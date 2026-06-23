@@ -1,0 +1,24 @@
+account_id = "3869ffbbf462deee55a7a0b1880ffb84"
+name = "stockyard-app"
+main = ".open-next/worker.js"
+compatibility_date = "2026-05-02"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+preview_urls = false
+
+[[routes]]
+pattern = "stockyardanimalhealth.com/*"
+zone_name = "stockyardanimalhealth.com"
+
+[[routes]]
+pattern = "www.stockyardanimalhealth.com/*"
+zone_name = "stockyardanimalhealth.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stockyard-db"
+database_id = "91093d69-d4ed-4f35-a88c-8dca8123b57e"
+
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
