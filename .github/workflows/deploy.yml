@@ -23,3 +23,4 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: 3869ffbbf462deee55a7a0b1880ffb84
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_live_51SKlMKAqBcPZQqqrykrUu61DlUyjdxzJQwcvYWenJrzzRWwzadxOVA5vpx1LYghGIWufBmDr63ubfLT7ZEMcVtds00QEa8TcK1
