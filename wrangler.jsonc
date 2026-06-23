@@ -1,0 +1,40 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "stockyard-app",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-05-02",
+	"compatibility_flags": [
+		"nodejs_compat",
+		"global_fetch_strictly_public"
+	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".open-next/assets"
+	},
+	"services": [
+		{
+			"binding": "WORKER_SELF_REFERENCE",
+			"service": "stockyard-app"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "stockyard-db",
+			"database_id": "91093d69-d4ed-4f35-a88c-8dca8123b57e"
+		}
+	],
+	"ai": { "binding": "AI" },
+	"workers_dev": true,
+	"routes": [
+		{ "pattern": "stockyardanimalhealth.com", "custom_domain": true },
+		{ "pattern": "www.stockyardanimalhealth.com", "custom_domain": true }
+	],
+	"triggers": {
+		"crons": ["* * * * *"]
+	},
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true
+}

@@ -1,0 +1,1 @@
+ALTER TABLE consultations ADD COLUMN sms_consent INTEGER NOT NULL DEFAULT 0;
