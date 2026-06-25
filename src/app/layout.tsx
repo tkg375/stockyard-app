@@ -117,6 +117,7 @@ export default function RootLayout({
       </head>
       <body>
         {children}
+        <script src="https://hailey.tgordo03.workers.dev/widget.v2.js" data-business-id="3b888f09-a12e-4655-b592-8b82889971bd" async></script>
       </body>
     </html>
   );
