@@ -148,7 +148,17 @@ export class StockyardVideoCall {
     } catch (err: unknown) {
       const error = err as { name?: string; message?: string };
       if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-        this.onError?.("camera_denied", "Camera and microphone access is required. Please allow access and try again.");
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        const isIOS = /iPhone|iPad/i.test(navigator.userAgent);
+        let msg = "Camera and microphone access was blocked.\n\n";
+        if (isAndroid) {
+          msg += "To fix this in Chrome:\n1. Tap the lock icon in the address bar\n2. Tap \"Permissions\"\n3. Allow Camera and Microphone\n4. Reload the page and try again.";
+        } else if (isIOS) {
+          msg += "To fix this in Safari:\n1. Open the Settings app\n2. Scroll down to Safari\n3. Tap \"Camera\" and \"Microphone\" and set both to Allow\n4. Return here and try again.";
+        } else {
+          msg += "To fix this:\n1. Click the camera icon in your browser's address bar\n2. Allow access to Camera and Microphone\n3. Reload the page and try again.";
+        }
+        this.onError?.("camera_denied", msg);
       } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
         this.onError?.("no_camera", "No camera or microphone found. Please connect a webcam and try again.");
       } else if (error.name === "NotReadableError") {
