@@ -26,15 +26,10 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
   const [status, setStatus] = useState<string | null>("Connecting…");
   const [flipping, setFlipping] = useState(false);
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
-  // Set when the browser blocks autoplay of the remote stream (iOS Safari). We then
-  // show a "Tap to start" button so a fresh user gesture can start playback + audio.
   const [needsTapToPlay, setNeedsTapToPlay] = useState(false);
-  // Set if the call hasn't connected after a while — surfaces a hint instead of an
-  // indefinite silent "Connecting…" (e.g. the other party denied camera or never joined).
   const [slowConnect, setSlowConnect] = useState(false);
-  // Countdown seconds remaining before auto-close after peer disconnect
-  const [reconnectCountdown, setReconnectCountdown] = useState<number | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // null = not reconnecting; "1/4" etc = attempt display
+  const [reconnectLabel, setReconnectLabel] = useState<string | null>(null);
   const isMobile = typeof navigator !== "undefined" && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
   // Lock orientation and prevent body scroll while in call
@@ -60,7 +55,6 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
 
   const close = useCallback(async () => {
     log("ended");
-    if (reconnectTimerRef.current) { clearInterval(reconnectTimerRef.current); reconnectTimerRef.current = null; }
     if (callRef.current) {
       await callRef.current.endCall();
       callRef.current = null;
@@ -70,37 +64,15 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
     onClose();
   }, [onClose, log]);
 
-  // When the peer disconnects, start a 20s countdown then auto-close so the vet returns
-  // to the lobby. The vet's overlay doesn't heartbeat lobby_vet, so the customer is stuck
-  // polling for a stale signal forever. Auto-closing lets clientWaiting detection on the
-  // dashboard surface the reconnect prompt immediately.
-  const startReconnectCountdown = useCallback(() => {
-    if (reconnectTimerRef.current) return; // already counting down
-    const SECONDS = 20;
-    setReconnectCountdown(SECONDS);
-    let remaining = SECONDS;
-    reconnectTimerRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        if (reconnectTimerRef.current) { clearInterval(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-        setReconnectCountdown(null);
-        close();
-      } else {
-        setReconnectCountdown(remaining);
-      }
-    }, 1000);
-  }, [close]);
-
   useEffect(() => {
     let mounted = true;
     let everConnected = false;
-    // If the call never connects, surface a hint after 30s rather than spinning silently.
     const connectTimer = setTimeout(() => { if (mounted && !everConnected) { setSlowConnect(true); log("slow_connect"); } }, 30000);
     const markConnected = () => {
       const first = !everConnected;
       everConnected = true;
       clearTimeout(connectTimer);
-      if (mounted) setSlowConnect(false);
+      if (mounted) { setSlowConnect(false); setReconnectLabel(null); }
       if (first) log("connected");
     };
 
@@ -113,9 +85,6 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         if (!mounted) return;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         log("local_stream", { tracks: stream.getTracks().map((t) => t.kind) });
-        // Re-check camera count now that permission is granted — iOS Safari only reports
-        // a single videoinput device until getUserMedia has succeeded, so checking before
-        // this point would hide the flip button on iPhones that do have front+back cameras.
         StockyardVideoCall.hasMultipleCameras().then((multi) => { if (mounted) setHasMultipleCameras(multi); });
       };
 
@@ -123,9 +92,6 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         if (!mounted) return;
         if (remoteVideoRef.current) {
           remoteVideoRef.current.srcObject = stream;
-          // Live WebRTC streams usually autoplay on iOS, but if the gesture window has
-          // expired during negotiation the browser will reject play() — fall back to a
-          // tap-to-start prompt so the user can always get audio/video.
           remoteVideoRef.current.play()
             .then(() => { if (mounted) setNeedsTapToPlay(false); })
             .catch(() => { if (mounted) { setNeedsTapToPlay(true); log("autoplay_blocked"); } });
@@ -141,15 +107,18 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         if (state === "connected") {
           markConnected();
           setStatus(null);
-          // Cancel any pending reconnect countdown — they came back
-          if (reconnectTimerRef.current) { clearInterval(reconnectTimerRef.current); reconnectTimerRef.current = null; }
-          setReconnectCountdown(null);
+        } else if (state === "connecting") {
+          setStatus("Connecting…");
+        } else if (state === "disconnected" || state === "failed") {
+          setStatus("Reconnecting…");
         }
-        else if (state === "connecting") setStatus("Connecting…");
-        else if (state === "disconnected" || state === "failed") {
-          setStatus(isVet ? "Waiting for client to reconnect…" : "Waiting for Dr. McMillen to reconnect…");
-          startReconnectCountdown();
-        }
+      };
+
+      call.onReconnecting = (attempt, max) => {
+        if (!mounted) return;
+        log("reconnecting", { attempt, max });
+        setReconnectLabel(`${attempt}/${max}`);
+        setStatus("Reconnecting…");
       };
 
       call.onWaiting = () => {
@@ -161,8 +130,9 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         log("error", { code, message });
         if (!mounted) return;
         if (code === "peer_disconnected" || code === "connection_failed") {
-          setStatus(isVet ? "Waiting for client to reconnect…" : "Waiting for Dr. McMillen to reconnect…");
-          startReconnectCountdown();
+          // connection_failed means we exhausted reconnect attempts — close the overlay
+          alert(message + "\n\nPlease try starting a new call.");
+          close();
         } else {
           alert(message);
           if (["camera_denied", "no_camera", "not_supported", "media_error"].includes(code)) {
@@ -173,7 +143,13 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
 
       const ok = await call.startCall();
       log("start_call_result", { ok });
-      // onError already called close() for hard failures; only close here for silent failures
+
+      if (ok && mounted) {
+        // Vet keeps heartbeating lobby_vet so customer's lobby poller always
+        // sees the vet as present, even mid-call, enabling clean reconnects.
+        if (isVet) call.startLobbyHeartbeat();
+      }
+
       if (!ok && mounted && callRef.current) close();
     }
 
@@ -182,7 +158,6 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
     return () => {
       mounted = false;
       clearTimeout(connectTimer);
-      if (reconnectTimerRef.current) { clearInterval(reconnectTimerRef.current); reconnectTimerRef.current = null; }
       if (callRef.current) {
         callRef.current.endCall().catch(() => {});
         callRef.current = null;
@@ -260,8 +235,7 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
 
       {/* Video area */}
       <div style={{ flex: 1, position: "relative", background: "#1a1a1a", overflow: "hidden" }}>
-        {/* Remote video — NOT muted so audio plays. play() is called explicitly when the
-            stream arrives; if the browser blocks autoplay we show a tap-to-start button. */}
+        {/* Remote video */}
         <video
           ref={remoteVideoRef}
           autoPlay
@@ -356,12 +330,12 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
             }}>
             <Spinner />
             {status}
-            {reconnectCountdown !== null && (
+            {reconnectLabel && (
               <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.75)", maxWidth: 280, lineHeight: 1.5 }}>
-                Returning to lobby in {reconnectCountdown}s so you can rejoin.
+                Attempt {reconnectLabel} — hang tight, re-establishing connection…
               </span>
             )}
-            {slowConnect && reconnectCountdown === null && (
+            {slowConnect && !reconnectLabel && (
               <span style={{ fontSize: "0.85rem", color: "rgba(255,255,255,0.75)", maxWidth: 280, lineHeight: 1.5 }}>
                 Still trying to connect. {isVet ? "Your client" : "Dr. McMillen"} may be having trouble — you can keep waiting, or tap the red button to end and try again.
               </span>

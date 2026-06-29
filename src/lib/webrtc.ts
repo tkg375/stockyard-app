@@ -8,6 +8,12 @@ const FALLBACK_ICE: RTCConfiguration = {
 };
 
 const POLL_INTERVAL = 1500; // ms
+const MAX_RECONNECT_ATTEMPTS = 4;
+const RECONNECT_BASE_DELAY_MS = 2000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 export type CallErrorCode =
   | "not_supported"
@@ -33,6 +39,7 @@ export class StockyardVideoCall {
   onConnectionStateChange: ((state: string) => void) | null = null;
   onError: ((code: CallErrorCode, message: string) => void) | null = null;
   onWaiting: (() => void) | null = null;
+  onReconnecting: ((attempt: number, max: number) => void) | null = null;
 
   private pollers: ReturnType<typeof setInterval>[] = [];
   private processedIceCounts = { vet: 0, customer: 0 };
@@ -40,11 +47,14 @@ export class StockyardVideoCall {
   private currentFacingMode: "user" | "environment" = "user";
   private localIceCandidates: RTCIceCandidateInit[] = [];
   private iceBatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private iceConfig: RTCConfiguration = FALLBACK_ICE;
 
-  // Guards against concurrent negotiation on the same peer connection
   private isNegotiating = false;
-  // Set to true once endCall() is called so lingering async callbacks bail out
   private destroyed = false;
+
+  private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lobbyHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(consultationId: string, isVet: boolean, guestToken?: string) {
     this.consultationId = consultationId;
@@ -72,20 +82,52 @@ export class StockyardVideoCall {
     }
   }
 
+  // Retries up to 4 times with exponential backoff so a transient network blip
+  // doesn't permanently lose ICE candidates or SDP messages.
   private async signalSet(key: string, data: unknown): Promise<void> {
-    try {
-      await fetch(this.signalUrl(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key, data }),
-      });
-    } catch { /* network error — caller handles */ }
+    const body = JSON.stringify({ key, data });
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const res = await fetch(this.signalUrl(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        if (res.ok) return;
+      } catch { /* retry */ }
+      if (this.destroyed) return;
+      if (attempt < 3) await sleep(300 * Math.pow(2, attempt)); // 300, 600, 1200 ms
+    }
+    console.warn(`[webrtc] signalSet gave up after 4 attempts: ${key}`);
   }
 
-  private async signalDelete(): Promise<void> {
+  private async signalDelete(keys?: string[]): Promise<void> {
     try {
-      await fetch(this.signalUrl(), { method: "DELETE" });
+      // signalUrl() already handles guest_token param; pass keys as the comma-separated
+      // "keys" query param so partial deletes work without double-encoding the URL.
+      const url = keys?.length ? this.signalUrl(keys.join(",")) : this.signalUrl();
+      await fetch(url, { method: "DELETE" });
     } catch { /* best-effort */ }
+  }
+
+  // ── Lobby heartbeat ───────────────────────────────────────────────────────
+  // Keeps lobby_vet alive even during an active call so the customer's lobby
+  // poller sees the vet as present and can rejoin if the call drops.
+
+  startLobbyHeartbeat(): void {
+    if (!this.isVet || this.lobbyHeartbeatInterval) return;
+    const beat = () => {
+      if (!this.destroyed) this.signalSet("lobby_vet", { ts: Date.now() });
+    };
+    beat();
+    this.lobbyHeartbeatInterval = setInterval(beat, 5000);
+  }
+
+  stopLobbyHeartbeat(): void {
+    if (this.lobbyHeartbeatInterval) {
+      clearInterval(this.lobbyHeartbeatInterval);
+      this.lobbyHeartbeatInterval = null;
+    }
   }
 
   // ── Media ─────────────────────────────────────────────────────────────────
@@ -158,17 +200,28 @@ export class StockyardVideoCall {
       const state = this.peerConnection?.connectionState;
       if (!state) return;
       this.onConnectionStateChange?.(state);
-      if (state === "disconnected") {
-        this.onError?.("peer_disconnected", "The other participant has disconnected. They may rejoin shortly.");
+
+      if (state === "connected") {
+        // Reset reconnect counter on a clean connection
+        this.reconnectAttempts = 0;
+        if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+      } else if (state === "disconnected") {
+        // Short grace period — Chrome briefly goes "disconnected" on packet loss
+        this.reconnectTimer = setTimeout(() => {
+          if (!this.destroyed && this.peerConnection?.connectionState === "disconnected") {
+            this.scheduleReconnect();
+          }
+        }, 3000);
       } else if (state === "failed") {
-        this.onError?.("connection_failed", "Connection failed. Please check your internet connection and try again.");
+        this.scheduleReconnect();
       }
     };
 
     this.peerConnection.oniceconnectionstatechange = () => {
-      if (!this.destroyed && this.peerConnection?.iceConnectionState === "failed") {
-        this.peerConnection.restartIce();
-      }
+      if (this.destroyed) return;
+      const s = this.peerConnection?.iceConnectionState;
+      // ICE restart is a lightweight first attempt before full renegotiation
+      if (s === "failed") this.peerConnection?.restartIce();
     };
   }
 
@@ -181,6 +234,7 @@ export class StockyardVideoCall {
       this.iceBatchTimer = null;
       if (this.destroyed) return;
       const key = this.isVet ? "ice_vet" : "ice_customer";
+      // signalSet retries internally — candidates will be delivered
       await this.signalSet(key, { candidates: [...this.localIceCandidates] });
     }, 200);
   }
@@ -257,22 +311,14 @@ export class StockyardVideoCall {
     this.pollers.push(poller);
   }
 
-  // ── Deterministic join: vet is always the caller (offerer), customer the callee ──
-  //
-  // Roles are fixed by isVet rather than by arrival order/timestamps. This eliminates
-  // the "glare" deadlock where both peers, released simultaneously by the lobby, each
-  // see the other present and both create an offer — leaving both waiting forever for
-  // an answer. With fixed roles the offer simply sits in D1 until the callee reads it,
-  // so the exchange completes regardless of who mounts their overlay first.
+  // Vet = offerer, customer = answerer. Fixed roles prevent glare deadlock.
 
   private async joinRoom(): Promise<void> {
     if (this.isVet) {
-      // Caller: create the offer and wait for the customer's answer.
       await this.createOffer();
       if (this.destroyed) return;
       this.startAnswerPoller();
     } else {
-      // Callee: the vet's offer may already be waiting (vet mounted first); otherwise poll.
       const data = await this.signalGet(["offer"]);
       if (this.destroyed) return;
       const offer = data["offer"] as RTCSessionDescriptionInit | undefined;
@@ -324,6 +370,62 @@ export class StockyardVideoCall {
     }
   }
 
+  // ── Reconnection ──────────────────────────────────────────────────────────
+
+  private scheduleReconnect(): void {
+    if (this.destroyed) return;
+    if (this.reconnectTimer) return; // already scheduled
+
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this.onError?.("connection_failed", "Could not reconnect after multiple attempts. Please end the call and try again.");
+      return;
+    }
+
+    const delay = RECONNECT_BASE_DELAY_MS * Math.pow(1.5, this.reconnectAttempts);
+    this.reconnectAttempts++;
+    this.onReconnecting?.(this.reconnectAttempts, MAX_RECONNECT_ATTEMPTS);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (!this.destroyed) this.doReconnect();
+    }, delay);
+  }
+
+  private async doReconnect(): Promise<void> {
+    if (this.destroyed) return;
+
+    // Stop all existing pollers for this connection
+    this.pollers.forEach(clearInterval);
+    this.pollers = [];
+
+    // Close the old peer connection
+    if (this.peerConnection) {
+      this.peerConnection.onconnectionstatechange = null;
+      this.peerConnection.oniceconnectionstatechange = null;
+      this.peerConnection.onicecandidate = null;
+      this.peerConnection.ontrack = null;
+      this.peerConnection.close();
+      this.peerConnection = null;
+    }
+
+    // Clear ICE state
+    this.processedIceCounts = { vet: 0, customer: 0 };
+    this.pendingRemoteIce = [];
+    this.localIceCandidates = [];
+    this.isNegotiating = false;
+    if (this.iceBatchTimer) { clearTimeout(this.iceBatchTimer); this.iceBatchTimer = null; }
+
+    // Wipe only the negotiation signals — keep lobby presence intact
+    await this.signalDelete(["offer", "answer", "ice_vet", "ice_customer"]);
+    if (this.destroyed) return;
+
+    // Fresh peer connection using cached ICE config (avoid extra round-trip)
+    this.createPeerConnection(this.iceConfig);
+    await this.joinRoom();
+    if (this.destroyed) return;
+    this.startIcePoller();
+  }
+
   // ── Public API ────────────────────────────────────────────────────────────
 
   static isSupported(): boolean {
@@ -343,6 +445,7 @@ export class StockyardVideoCall {
         this.fetchIceConfig(),
       ]);
       if (this.destroyed) return false;
+      this.iceConfig = iceConfig; // cache for reconnections
       this.createPeerConnection(iceConfig);
       await this.joinRoom();
       this.startIcePoller();
@@ -414,17 +517,25 @@ export class StockyardVideoCall {
 
   async endCall(): Promise<void> {
     this.destroyed = true;
+    this.stopLobbyHeartbeat();
     this.pollers.forEach(clearInterval);
     this.pollers = [];
     if (this.iceBatchTimer) { clearTimeout(this.iceBatchTimer); this.iceBatchTimer = null; }
+    if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.pendingRemoteIce = [];
     this.localIceCandidates = [];
     this.processedIceCounts = { vet: 0, customer: 0 };
     this.isNegotiating = false;
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.localStream = null;
-    this.peerConnection?.close();
-    this.peerConnection = null;
+    if (this.peerConnection) {
+      this.peerConnection.onconnectionstatechange = null;
+      this.peerConnection.oniceconnectionstatechange = null;
+      this.peerConnection.onicecandidate = null;
+      this.peerConnection.ontrack = null;
+      this.peerConnection.close();
+      this.peerConnection = null;
+    }
     await this.signalDelete();
   }
 }
