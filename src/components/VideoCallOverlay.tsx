@@ -10,9 +10,11 @@ interface Props {
   isVet: boolean;
   guestToken?: string;
   onClose: () => void;
+  // Stream pre-acquired in the lobby so camera is ready the moment the overlay opens
+  lobbyStream?: MediaStream | null;
 }
 
-export default function VideoCallOverlay({ consultationId, petName, isVet, guestToken, onClose }: Props) {
+export default function VideoCallOverlay({ consultationId, petName, isVet, guestToken, onClose, lobbyStream }: Props) {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const callRef = useRef<StockyardVideoCall | null>(null);
@@ -23,7 +25,7 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
 
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
-  const [status, setStatus] = useState<string | null>("Connecting…");
+  const [status, setStatus] = useState<string | null>("Starting camera…");
   const [flipping, setFlipping] = useState(false);
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [needsTapToPlay, setNeedsTapToPlay] = useState(false);
@@ -76,6 +78,11 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
       if (first) log("connected");
     };
 
+    // Show local video immediately from lobby preview so there's no black screen on open
+    if (lobbyStream && localVideoRef.current) {
+      localVideoRef.current.srcObject = lobbyStream;
+    }
+
     async function start() {
       log("overlay_start", { ua: typeof navigator !== "undefined" ? navigator.userAgent : "", mobile: isMobile });
       const call = new StockyardVideoCall(consultationId, isVet, guestToken);
@@ -86,6 +93,8 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
         log("local_stream", { tracks: stream.getTracks().map((t) => t.kind) });
         StockyardVideoCall.hasMultipleCameras().then((multi) => { if (mounted) setHasMultipleCameras(multi); });
+        // Camera is live — advance past "Starting camera…"
+        setStatus(s => s === "Starting camera…" ? "Connecting…" : s);
       };
 
       call.onRemoteStream = (stream) => {
@@ -129,11 +138,15 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
       call.onError = (code, message) => {
         log("error", { code, message });
         if (!mounted) return;
-        if (code === "peer_disconnected" || code === "connection_failed") {
-          // connection_failed means we exhausted reconnect attempts — close the overlay
+        if (code === "connection_failed") {
+          // Exhausted all reconnect attempts — must end the call
           alert(message + "\n\nPlease try starting a new call.");
           close();
+        } else if (code === "signaling_failed" || code === "sdp_error") {
+          // Transient — show in the status bar, never alert
+          setStatus(message);
         } else {
+          // Fatal camera/device errors
           alert(message);
           if (["camera_denied", "no_camera", "not_supported", "media_error"].includes(code)) {
             close();

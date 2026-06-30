@@ -234,6 +234,8 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
   const [lobbyState, setLobbyState] = useState<"idle" | "waiting" | "joined">("idle");
   const [vetReadyLoading, setVetReadyLoading] = useState(false);
   const lobbyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [lobbyStream, setLobbyStream] = useState<MediaStream | null>(null);
+  const lobbyVideoRef = useRef<HTMLVideoElement>(null);
   // True when the client is currently sitting in the waiting room (fresh lobby_customer),
   // detected even while the vet is idle so the vet is prompted to join.
   const [clientWaiting, setClientWaiting] = useState(false);
@@ -502,6 +504,22 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
     if (vetReadyLoading) return;
     setVetReadyLoading(true);
     logCall(id, "vet", "ready_click");
+
+    // Pre-acquire camera so permission is granted before the overlay opens
+    if (!lobbyStream) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        setLobbyStream(stream);
+        if (lobbyVideoRef.current) {
+          lobbyVideoRef.current.srcObject = stream;
+          lobbyVideoRef.current.play().catch(() => {});
+        }
+      } catch { /* VideoCallOverlay will handle the error */ }
+    }
+
     // Kick off notification + status update
     await fetch(`/api/consultations/${id}/start`, { method: "POST" });
     await loadConsultation();
@@ -653,10 +671,18 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
               </button>
             )}
             {lobbyState === "waiting" && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#f0fafa", border: "1px solid #c5e5e5", borderRadius: 8, padding: "6px 14px", fontSize: "0.875rem", color: "#1a6a6a", fontWeight: 600 }}>
-                <span style={{ width: 14, height: 14, border: "2px solid #c5e5e5", borderTopColor: "#1a6a6a", borderRadius: "50%", display: "inline-block", animation: "spin 1s linear infinite" }} />
-                Waiting for client to join…
-              </span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "#f0fafa", border: "1px solid #c5e5e5", borderRadius: 8, padding: "6px 14px", fontSize: "0.875rem", color: "#1a6a6a", fontWeight: 600 }}>
+                  <span style={{ width: 14, height: 14, border: "2px solid #c5e5e5", borderTopColor: "#1a6a6a", borderRadius: "50%", display: "inline-block", animation: "spin 1s linear infinite" }} />
+                  Waiting for client to join…
+                </span>
+                {lobbyStream && (
+                  <div style={{ position: "relative", display: "inline-block" }}>
+                    <video ref={lobbyVideoRef} autoPlay playsInline muted style={{ width: 180, borderRadius: 10, background: "#333", display: "block", border: "2px solid #c5e5e5" }} />
+                    <div style={{ position: "absolute", top: 6, left: 6, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: "0.68rem", fontWeight: 600, padding: "2px 6px", borderRadius: 5 }}>Your camera</div>
+                  </div>
+                )}
+              </div>
             )}
             {c.status === "in_progress" && lobbyState === "idle" && (
               <button className="btn btn-small" style={{ background: "#6c757d", color: "#fff", border: "none" }} onClick={resendVideoLink}>
@@ -1276,11 +1302,13 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
         consultationId={id}
         petName={c.pet_name}
         isVet={true}
+        lobbyStream={lobbyStream}
         onClose={() => {
           setVideoCallOpen(false);
           setLobbyState("idle");
           setVetReadyLoading(false);
           if (lobbyPollRef.current) { clearInterval(lobbyPollRef.current); lobbyPollRef.current = null; }
+          if (lobbyStream) { lobbyStream.getTracks().forEach(t => t.stop()); setLobbyStream(null); }
         }}
       />
     )}

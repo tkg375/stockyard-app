@@ -22,8 +22,9 @@ export type CallErrorCode =
   | "camera_in_use"
   | "media_error"
   | "start_failed"
-  | "peer_disconnected"
-  | "connection_failed";
+  | "connection_failed"
+  | "signaling_failed"
+  | "sdp_error";
 
 export class StockyardVideoCall {
   consultationId: string;
@@ -55,6 +56,10 @@ export class StockyardVideoCall {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lobbyHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  private pollerTimeouts: ReturnType<typeof setTimeout>[] = [];
+  private signalGetFailures = 0;
+
+  private static readonly POLLER_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(consultationId: string, isVet: boolean, guestToken?: string) {
     this.consultationId = consultationId;
@@ -75,9 +80,19 @@ export class StockyardVideoCall {
   private async signalGet(keys: string[]): Promise<Record<string, unknown>> {
     try {
       const res = await fetch(this.signalUrl(keys.join(",")));
-      if (!res.ok) return {};
+      if (!res.ok) {
+        // Only surface after 3 consecutive failures so transient blips don't show errors
+        if (++this.signalGetFailures >= 3) {
+          this.onError?.("signaling_failed", "Trouble reaching the server. Check your connection.");
+        }
+        return {};
+      }
+      this.signalGetFailures = 0;
       return res.json();
     } catch {
+      if (++this.signalGetFailures >= 3) {
+        this.onError?.("signaling_failed", "Trouble reaching the server. Check your connection.");
+      }
       return {};
     }
   }
@@ -218,6 +233,7 @@ export class StockyardVideoCall {
       } else if (state === "disconnected") {
         // Short grace period — Chrome briefly goes "disconnected" on packet loss
         this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
           if (!this.destroyed && this.peerConnection?.connectionState === "disconnected") {
             this.scheduleReconnect();
           }
@@ -244,8 +260,10 @@ export class StockyardVideoCall {
       this.iceBatchTimer = null;
       if (this.destroyed) return;
       const key = this.isVet ? "ice_vet" : "ice_customer";
+      const batch = [...this.localIceCandidates];
+      this.localIceCandidates = [];
       // signalSet retries internally — candidates will be delivered
-      await this.signalSet(key, { candidates: [...this.localIceCandidates] });
+      await this.signalSet(key, { candidates: batch });
     }, 200);
   }
 
@@ -260,22 +278,60 @@ export class StockyardVideoCall {
         const data = await this.signalGet([remoteKey]);
         const candidates: RTCIceCandidateInit[] =
           (data[remoteKey] as { candidates?: RTCIceCandidateInit[] })?.candidates ?? [];
-        for (let i = this.processedIceCounts[countKey]; i < candidates.length; i++) {
+        const newCount = candidates.length;
+        for (let i = this.processedIceCounts[countKey]; i < newCount; i++) {
           if (this.destroyed || !this.peerConnection) break;
           if (!this.peerConnection.currentRemoteDescription) {
             this.pendingRemoteIce.push(candidates[i]);
           } else {
             try {
-              await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidates[i]));
-            } catch { /* stale candidate — ignore */ }
+              await this.peerConnection.addIceCandidate(candidates[i]);
+            } catch (err: unknown) {
+              const name = (err as { name?: string }).name;
+              // OperationError / InvalidStateError = stale or already-processed candidate; safe to skip.
+              // Anything else is unexpected — log it.
+              if (name !== "OperationError" && name !== "InvalidStateError") {
+                console.warn("[webrtc] addIceCandidate failed:", err);
+              }
+            }
           }
         }
-        this.processedIceCounts[countKey] = candidates.length;
+        this.processedIceCounts[countKey] = newCount;
       } finally {
         running = false;
       }
     }, POLL_INTERVAL);
     this.pollers.push(poller);
+  }
+
+  // Drains pendingRemoteIce after remote description is set.
+  // Captures the array before iterating so candidates that arrive mid-drain
+  // don't get lost if we clear and more are pushed concurrently.
+  private async drainPendingIce(): Promise<void> {
+    const queued = this.pendingRemoteIce.splice(0);
+    for (const candidate of queued) {
+      if (this.destroyed || !this.peerConnection) break;
+      try {
+        await this.peerConnection.addIceCandidate(candidate);
+      } catch (err: unknown) {
+        const name = (err as { name?: string }).name;
+        if (name !== "OperationError" && name !== "InvalidStateError") {
+          console.warn("[webrtc] drainPendingIce addIceCandidate failed:", err);
+        }
+      }
+    }
+  }
+
+  // Registers a hard timeout on a poller so it stops after POLLER_TIMEOUT_MS
+  // if the remote peer never responds (e.g. they crashed before sending an offer/answer).
+  private addPollerTimeout(poller: ReturnType<typeof setInterval>): void {
+    const t = setTimeout(() => {
+      clearInterval(poller);
+      if (!this.destroyed) {
+        this.onError?.("connection_failed", "Remote peer did not respond in time. Please try again.");
+      }
+    }, StockyardVideoCall.POLLER_TIMEOUT_MS);
+    this.pollerTimeouts.push(t);
   }
 
   // ── Offer / Answer ────────────────────────────────────────────────────────
@@ -284,9 +340,16 @@ export class StockyardVideoCall {
     if (!this.peerConnection || this.isNegotiating || this.destroyed) return;
     this.isNegotiating = true;
     try {
-      const offer = await this.peerConnection.createOffer();
-      if (this.destroyed || !this.peerConnection) return;
-      await this.peerConnection.setLocalDescription(offer);
+      let offer: RTCSessionDescriptionInit;
+      try {
+        offer = await this.peerConnection.createOffer();
+        if (this.destroyed || !this.peerConnection) return;
+        await this.peerConnection.setLocalDescription(offer);
+      } catch (err) {
+        console.warn("[webrtc] createOffer/setLocalDescription failed:", err);
+        this.onError?.("sdp_error", "Failed to create offer.");
+        return;
+      }
       await this.signalSet("offer", { type: offer.type, sdp: offer.sdp });
     } finally {
       this.isNegotiating = false;
@@ -297,28 +360,28 @@ export class StockyardVideoCall {
     let running = false;
     const poller = setInterval(async () => {
       if (running || this.destroyed || !this.peerConnection) return;
-      if (this.peerConnection.currentRemoteDescription) {
-        clearInterval(poller);
-        return;
-      }
+      if (this.peerConnection.currentRemoteDescription) { clearInterval(poller); return; }
       running = true;
       try {
         const data = await this.signalGet(["answer"]);
         const answer = data["answer"] as RTCSessionDescriptionInit | undefined;
         if (answer?.sdp && this.peerConnection && !this.peerConnection.currentRemoteDescription && !this.destroyed) {
           clearInterval(poller);
-          await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-          for (const candidate of this.pendingRemoteIce) {
-            if (this.destroyed || !this.peerConnection) break;
-            try { await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); } catch { /* ignore */ }
+          try {
+            await this.peerConnection.setRemoteDescription(answer);
+          } catch (err) {
+            console.warn("[webrtc] setRemoteDescription (answer) failed:", err);
+            this.onError?.("sdp_error", "Failed to process answer from remote peer.");
+            return;
           }
-          this.pendingRemoteIce = [];
+          await this.drainPendingIce();
         }
       } finally {
         running = false;
       }
     }, POLL_INTERVAL);
     this.pollers.push(poller);
+    this.addPollerTimeout(poller);
   }
 
   // Vet = offerer, customer = answerer. Fixed roles prevent glare deadlock.
@@ -359,22 +422,30 @@ export class StockyardVideoCall {
       }
     }, POLL_INTERVAL);
     this.pollers.push(poller);
+    this.addPollerTimeout(poller);
   }
 
   private async answerOffer(offer: RTCSessionDescriptionInit): Promise<void> {
     if (!this.peerConnection || this.peerConnection.currentRemoteDescription || this.isNegotiating || this.destroyed) return;
     this.isNegotiating = true;
     try {
-      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      for (const candidate of this.pendingRemoteIce) {
-        if (this.destroyed || !this.peerConnection) break;
-        try { await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate)); } catch { /* ignore */ }
+      try {
+        await this.peerConnection.setRemoteDescription(offer);
+      } catch (err) {
+        console.warn("[webrtc] setRemoteDescription (offer) failed:", err);
+        this.onError?.("sdp_error", "Failed to process offer from remote peer.");
+        return;
       }
-      this.pendingRemoteIce = [];
+      await this.drainPendingIce();
       if (this.destroyed || !this.peerConnection) return;
-      const answer = await this.peerConnection.createAnswer();
-      await this.peerConnection.setLocalDescription(answer);
-      await this.signalSet("answer", { type: answer.type, sdp: answer.sdp });
+      try {
+        const answer = await this.peerConnection.createAnswer();
+        await this.peerConnection.setLocalDescription(answer);
+        await this.signalSet("answer", { type: answer.type, sdp: answer.sdp });
+      } catch (err) {
+        console.warn("[webrtc] createAnswer/setLocalDescription failed:", err);
+        this.onError?.("sdp_error", "Failed to create answer.");
+      }
     } finally {
       this.isNegotiating = false;
     }
@@ -404,9 +475,11 @@ export class StockyardVideoCall {
   private async doReconnect(): Promise<void> {
     if (this.destroyed) return;
 
-    // Stop all existing pollers for this connection
+    // Stop all existing pollers and their timeouts for this connection
     this.pollers.forEach(clearInterval);
     this.pollers = [];
+    this.pollerTimeouts.forEach(clearTimeout);
+    this.pollerTimeouts = [];
 
     // Close the old peer connection
     if (this.peerConnection) {
@@ -488,7 +561,8 @@ export class StockyardVideoCall {
   }
 
   async flipCamera(): Promise<"user" | "environment" | false> {
-    if (!this.localStream || this.destroyed) return false;
+    if (!this.localStream || this.destroyed || this.isNegotiating) return false;
+    this.isNegotiating = true;
     const next = this.currentFacingMode === "user" ? "environment" : "user";
     try {
       const isPortrait = typeof window !== "undefined" && window.innerHeight > window.innerWidth;
@@ -522,6 +596,8 @@ export class StockyardVideoCall {
       return this.currentFacingMode;
     } catch {
       return false;
+    } finally {
+      this.isNegotiating = false;
     }
   }
 
@@ -530,6 +606,8 @@ export class StockyardVideoCall {
     this.stopLobbyHeartbeat();
     this.pollers.forEach(clearInterval);
     this.pollers = [];
+    this.pollerTimeouts.forEach(clearTimeout);
+    this.pollerTimeouts = [];
     if (this.iceBatchTimer) { clearTimeout(this.iceBatchTimer); this.iceBatchTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     this.pendingRemoteIce = [];

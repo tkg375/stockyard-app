@@ -35,6 +35,8 @@ function GuestConsultationInner() {
   const [lobbyState, setLobbyState] = useState<"idle" | "waiting" | "joined">("idle");
   const [readyLoading, setReadyLoading] = useState(false);
   const lobbyPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [lobbyStream, setLobbyStream] = useState<MediaStream | null>(null);
+  const lobbyVideoRef = useRef<HTMLVideoElement>(null);
 
   const signalUrl = useCallback((keys?: string) => {
     const p = new URLSearchParams();
@@ -100,15 +102,39 @@ function GuestConsultationInner() {
   }, [signalUrl, writeLobbyPresence, id]);
 
   useEffect(() => {
-    return () => { if (lobbyPollRef.current) clearInterval(lobbyPollRef.current); };
+    return () => {
+      if (lobbyPollRef.current) clearInterval(lobbyPollRef.current);
+      if (lobbyStream) lobbyStream.getTracks().forEach(t => t.stop());
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function markReady() {
     if (readyLoading) return;
     setReadyLoading(true);
     logCall(id, "customer", "ready_click");
+
+    // Acquire camera now so permission is pre-granted before the overlay opens,
+    // and so the user sees a live preview instead of a black waiting screen.
+    if (!lobbyStream) {
+      try {
+        const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+        const isPortrait = isMobile && window.innerHeight > window.innerWidth;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: isPortrait ? { width: { ideal: 720 }, height: { ideal: 1280 }, facingMode: "user" } : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        setLobbyStream(stream);
+        if (lobbyVideoRef.current) {
+          lobbyVideoRef.current.srcObject = stream;
+          lobbyVideoRef.current.play().catch(() => {});
+        }
+      } catch {
+        // Camera denied or unavailable — VideoCallOverlay will handle the error properly
+      }
+    }
+
     // Write our lobby presence
-    await writeLobbyPresence();
     // Check if vet is already (freshly) waiting
     const res = await fetch(signalUrl("lobby_vet"));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -198,7 +224,23 @@ function GuestConsultationInner() {
 
             {isActive && lobbyState === "waiting" && (
               <div style={{ textAlign: "center", padding: "8px 0" }}>
-                <div style={{ width: 48, height: 48, border: "3px solid #c5e5e5", borderTopColor: "#1a6a6a", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
+                {lobbyStream && (
+                  <div style={{ position: "relative", display: "inline-block", marginBottom: 16 }}>
+                    <video
+                      ref={lobbyVideoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      style={{ width: "100%", maxWidth: 280, borderRadius: 12, background: "#333", display: "block" }}
+                    />
+                    <div style={{ position: "absolute", top: 8, left: 8, background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: "0.72rem", fontWeight: 600, padding: "3px 8px", borderRadius: 6 }}>
+                      Your camera
+                    </div>
+                  </div>
+                )}
+                {!lobbyStream && (
+                  <div style={{ width: 48, height: 48, border: "3px solid #c5e5e5", borderTopColor: "#1a6a6a", borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 16px" }} />
+                )}
                 <p style={{ fontWeight: 700, color: "#1a6a6a", fontSize: "1.05rem", marginBottom: 6 }}>You&apos;re ready!</p>
                 <p style={{ color: "#777", fontSize: "0.875rem", lineHeight: 1.6 }}>
                   Waiting for Dr. McMillen to join…<br />
@@ -246,7 +288,13 @@ function GuestConsultationInner() {
           petName={consult.pet_name}
           isVet={false}
           guestToken={token ?? undefined}
-          onClose={() => setLobbyState("idle")}
+          lobbyStream={lobbyStream}
+          onClose={() => {
+            setLobbyState("idle");
+            // Lobby stream ownership is transferred to the overlay on join;
+            // stop it here only if the overlay never picked it up.
+            if (lobbyStream) { lobbyStream.getTracks().forEach(t => t.stop()); setLobbyStream(null); }
+          }}
         />
       )}
     </div>
