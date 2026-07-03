@@ -352,13 +352,10 @@ export default function ManageConsultationPage() {
             </div>
           )}
 
-          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid #f3f4f6", textAlign: "center", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid #f3f4f6", textAlign: "center" }}>
             <button onClick={() => setTroubleOpen(true)} style={{ background: "none", border: "none", color: "#1a6a6a", fontSize: "0.85rem", cursor: "pointer", fontWeight: 600, padding: 0, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>
               Having Trouble?
             </button>
-            <Link href="/vet-login" style={{ color: "#9ca3af", fontSize: "0.8rem" }}>
-              Veterinarian login →
-            </Link>
           </div>
         </div>
       </div>
