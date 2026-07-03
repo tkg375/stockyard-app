@@ -176,14 +176,6 @@ export default function VetDashboardPage() {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState("");
 
-  // Signature
-  const sigCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [sigDrawing, setSigDrawing] = useState(false);
-  const [sigSaved, setSigSaved] = useState(false);
-  const [sigSaving, setSigSaving] = useState(false);
-  const [existingSig, setExistingSig] = useState<string | null>(null);
-  const sigLastPos = useRef<{ x: number; y: number } | null>(null);
-
   // Availability
   const [schedule, setSchedule] = useState<WeekSchedule>(DEFAULT_SCHEDULE);
   const [blockedDates, setBlockedDates] = useState<string[]>([]);
@@ -249,10 +241,6 @@ export default function VetDashboardPage() {
         });
         setSettingsLoaded(true);
       });
-    fetch("/api/settings/signature")
-      .then(r => r.ok ? r.json() : {})
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .then((d: any) => { if (d.signature) setExistingSig(d.signature); });
   }, []);
 
   useEffect(() => {
@@ -398,43 +386,6 @@ export default function VetDashboardPage() {
     const items = consultations.filter(x => x.user_id === c.user_id && x.pet_name === c.pet_name);
     setHistoryModal({ petName: c.pet_name, userId: c.user_id, items });
     setHistoryLoading(false);
-  }
-
-  function sigPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    const canvas = sigCanvasRef.current; if (!canvas) return;
-    canvas.setPointerCapture(e.pointerId);
-    const rect = canvas.getBoundingClientRect();
-    sigLastPos.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    setSigDrawing(true); setSigSaved(false);
-  }
-  function sigPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (!sigDrawing || !sigLastPos.current) return;
-    const canvas = sigCanvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top;
-    ctx.beginPath(); ctx.moveTo(sigLastPos.current.x, sigLastPos.current.y);
-    ctx.lineTo(x, y); ctx.strokeStyle = "#1a2e2e"; ctx.lineWidth = 2.5;
-    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
-    sigLastPos.current = { x, y };
-  }
-  function sigPointerUp() { setSigDrawing(false); sigLastPos.current = null; }
-  function clearSignature() {
-    const canvas = sigCanvasRef.current; if (!canvas) return;
-    const ctx = canvas.getContext("2d"); if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setExistingSig(null); setSigSaved(false);
-  }
-  async function saveSignature() {
-    const canvas = sigCanvasRef.current; if (!canvas) return;
-    const dataUrl = canvas.toDataURL("image/png");
-    setSigSaving(true);
-    const r = await fetch("/api/settings/signature", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signature: dataUrl }),
-    });
-    setSigSaving(false);
-    if (r.ok) { setExistingSig(dataUrl); setSigSaved(true); setTimeout(() => setSigSaved(false), 3000); }
   }
 
   async function saveVetSettings() {
@@ -881,41 +832,6 @@ export default function VetDashboardPage() {
                           </div>
                         )}
 
-                      </div>
-
-                      {/* Signature widget */}
-                      <div style={{ background: "rgba(255,255,255,0.55)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderRadius: "12px", padding: "28px", boxShadow: "var(--shadow)", marginBottom: "24px" }}>
-                        <h3 style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem", color: "#1a6a6a", marginBottom: "6px" }}>
-                          Prescription Signature
-                        </h3>
-                        <p style={{ color: "#666", fontSize: "0.875rem", marginBottom: "16px" }}>
-                          Draw your signature below. It will appear on all prescription PDFs.
-                        </p>
-                        {existingSig && (
-                          <div style={{ marginBottom: "12px" }}>
-                            <p style={{ fontSize: "0.78rem", color: "#28a745", fontWeight: 600, marginBottom: "6px" }}>✓ Saved signature:</p>
-                            <img src={existingSig} alt="Saved signature" style={{ border: "1px solid #d4c9b8", borderRadius: "8px", maxWidth: "100%", background: "#fff" }} />
-                          </div>
-                        )}
-                        <div style={{ border: "2px solid #d4c9b8", borderRadius: "8px", background: "#fff", display: "block", width: "100%", touchAction: "none" }}>
-                          <canvas
-                            ref={sigCanvasRef}
-                            width={360}
-                            height={100}
-                            style={{ display: "block", cursor: "crosshair", borderRadius: "6px", width: "100%", height: "auto" }}
-                            onPointerDown={sigPointerDown}
-                            onPointerMove={sigPointerMove}
-                            onPointerUp={sigPointerUp}
-                            onPointerLeave={sigPointerUp}
-                          />
-                        </div>
-                        <p style={{ fontSize: "0.75rem", color: "#aaa", marginTop: "6px" }}>Draw with your mouse or finger</p>
-                        <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-                          <button className="btn btn-secondary btn-small" onClick={clearSignature}>Clear</button>
-                          <button className="btn btn-primary btn-small" onClick={saveSignature} disabled={sigSaving}>
-                            {sigSaving ? "Saving…" : sigSaved ? "✓ Saved!" : "Save Signature"}
-                          </button>
-                        </div>
                       </div>
 
                       {settingsMsg && (
