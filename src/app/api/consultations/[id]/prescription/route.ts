@@ -254,7 +254,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // Load consultation + patient info
   const consult = await db.prepare(`
     SELECT * FROM consultations WHERE id = ?
-  `).first<Record<string, unknown>>(id);
+  `).bind(id).first<Record<string, unknown>>();
   if (!consult) return NextResponse.json({ error: "Consultation not found" }, { status: 404 });
 
   // Load vet settings + signature
