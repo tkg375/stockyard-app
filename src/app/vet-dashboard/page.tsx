@@ -167,11 +167,6 @@ export default function VetDashboardPage() {
   const [historyModal, setHistoryModal] = useState<{ petName: string; userId: string; items: Consultation[] } | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  // Misc appointment modal
-  const [miscModal, setMiscModal] = useState(false);
-  const [miscForm, setMiscForm] = useState({ petName: "", ownerName: "", ownerPhone: "", concern: "", subjective: "", objective: "", assessment: "", plan: "" });
-  const [miscSaving, setMiscSaving] = useState(false);
-
   // History tab search
   const [historySearch, setHistorySearch] = useState("");
 
@@ -405,36 +400,6 @@ export default function VetDashboardPage() {
     setHistoryLoading(false);
   }
 
-  async function saveMiscAppointment() {
-    if (!miscForm.petName.trim() || !miscForm.ownerName.trim() || !miscForm.concern.trim()) return;
-    setMiscSaving(true);
-    const res = await fetch("/api/consultations/misc", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        petName: miscForm.petName.trim(),
-        ownerName: miscForm.ownerName.trim(),
-        ownerPhone: miscForm.ownerPhone.trim() || undefined,
-        concern: miscForm.concern.trim(),
-        soap: {
-          subjective: miscForm.subjective,
-          objective: miscForm.objective,
-          assessment: miscForm.assessment,
-          plan: miscForm.plan,
-        },
-      }),
-    });
-    setMiscSaving(false);
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({})) as { error?: string };
-      alert(d.error ?? "Failed to save appointment");
-      return;
-    }
-    setMiscModal(false);
-    setMiscForm({ petName: "", ownerName: "", ownerPhone: "", concern: "", subjective: "", objective: "", assessment: "", plan: "" });
-    fetchConsultations();
-  }
-
   function sigPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     const canvas = sigCanvasRef.current; if (!canvas) return;
     canvas.setPointerCapture(e.pointerId);
@@ -621,13 +586,6 @@ export default function VetDashboardPage() {
                     <h2 style={{ fontFamily: "var(--font-display)", fontSize: "1.8rem", color: "#fff", margin: 0 }}>
                       Appointments
                     </h2>
-                    <button
-                      className="btn btn-secondary btn-small"
-                      onClick={() => setMiscModal(true)}
-                      style={{ whiteSpace: "nowrap", flexShrink: 0 }}
-                    >
-                      + Misc Appointment
-                    </button>
                   </div>
 
                   {active.length === 0 ? (
@@ -983,102 +941,6 @@ export default function VetDashboardPage() {
         </div>
       </div>
 
-
-      {/* ===== MISC APPOINTMENT MODAL ===== */}
-      {miscModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: "20px" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setMiscModal(false); }}>
-          <div style={{ background: "#fff", borderRadius: "16px", width: "100%", maxWidth: "600px", maxHeight: "92vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-            <div style={{ background: "#1a6a6a", color: "#fff", padding: "20px 28px", borderRadius: "16px 16px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0 }}>Miscellaneous Appointment</h3>
-              <button onClick={() => setMiscModal(false)} style={{ background: "none", border: "none", color: "#fff", fontSize: "1.5rem", cursor: "pointer" }}>×</button>
-            </div>
-            <div style={{ padding: "24px 28px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label style={{ fontWeight: 700, color: "#1a6a6a" }}>Pet Name <span style={{ color: "#dc3545" }}>*</span></label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. Buddy"
-                    value={miscForm.petName}
-                    onChange={(e) => setMiscForm({ ...miscForm, petName: e.target.value })}
-                  />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label style={{ fontWeight: 700, color: "#1a6a6a" }}>Owner Name <span style={{ color: "#dc3545" }}>*</span></label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="e.g. John Smith"
-                    value={miscForm.ownerName}
-                    onChange={(e) => setMiscForm({ ...miscForm, ownerName: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="form-group">
-                <label style={{ fontWeight: 700, color: "#1a6a6a" }}>Phone Number</label>
-                <input
-                  type="tel"
-                  className="form-input"
-                  placeholder="e.g. (555) 123-4567"
-                  value={miscForm.ownerPhone}
-                  onChange={(e) => setMiscForm({ ...miscForm, ownerPhone: e.target.value })}
-                />
-              </div>
-              <div className="form-group">
-                <label style={{ fontWeight: 700, color: "#1a6a6a" }}>Concern / Chief Complaint <span style={{ color: "#dc3545" }}>*</span></label>
-                <textarea
-                  className="form-input"
-                  rows={2}
-                  placeholder="Describe the reason for the visit…"
-                  value={miscForm.concern}
-                  onChange={(e) => setMiscForm({ ...miscForm, concern: e.target.value })}
-                />
-              </div>
-
-              <div style={{ borderTop: "1px solid var(--color-border)", margin: "4px 0 20px", paddingTop: "20px" }}>
-                <h4 style={{ fontFamily: "var(--font-display)", color: "#1a6a6a", marginBottom: "16px" }}>SOAP Notes</h4>
-                {(["subjective", "objective", "assessment", "plan"] as const).map((k) => (
-                  <div className="form-group" key={k}>
-                    <label style={{ fontWeight: 700, color: "#1a6a6a" }}>
-                      <span style={{ fontSize: "1.1rem" }}>{k[0].toUpperCase()}</span>{k.slice(1)}
-                      {k === "subjective" && <span style={{ fontWeight: 400, color: "#1a6a6a", marginLeft: "6px", fontSize: "0.8rem" }}>— Patient history &amp; owner report</span>}
-                      {k === "objective" && <span style={{ fontWeight: 400, color: "#1a6a6a", marginLeft: "6px", fontSize: "0.8rem" }}>— Observations &amp; findings</span>}
-                      {k === "assessment" && <span style={{ fontWeight: 400, color: "#1a6a6a", marginLeft: "6px", fontSize: "0.8rem" }}>— Diagnosis / differential</span>}
-                      {k === "plan" && <span style={{ fontWeight: 400, color: "#1a6a6a", marginLeft: "6px", fontSize: "0.8rem" }}>— Treatment &amp; follow-up</span>}
-                    </label>
-                    <textarea
-                      className="form-input"
-                      rows={3}
-                      value={miscForm[k]}
-                      onChange={(e) => setMiscForm({ ...miscForm, [k]: e.target.value })}
-                      placeholder={
-                        k === "subjective" ? "Owner reports…" :
-                        k === "objective" ? "Physical exam findings…" :
-                        k === "assessment" ? "Working diagnosis…" :
-                        "Treatment plan, prescriptions, follow-up…"
-                      }
-                    />
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
-                <button className="btn btn-secondary btn-small" onClick={() => setMiscModal(false)} disabled={miscSaving}>Cancel</button>
-                <button
-                  className="btn btn-primary btn-small"
-                  onClick={saveMiscAppointment}
-                  disabled={miscSaving || !miscForm.petName.trim() || !miscForm.ownerName.trim() || !miscForm.concern.trim()}
-                  style={{ background: "#6b8e23", borderColor: "#6b8e23" }}
-                >
-                  {miscSaving ? "Saving…" : "Save Appointment"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ===== SOAP NOTES MODAL ===== */}
       {soapModal && (

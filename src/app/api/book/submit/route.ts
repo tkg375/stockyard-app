@@ -44,6 +44,12 @@ export async function POST(req: NextRequest) {
   if (!body.name || !body.email || !body.petName || !body.petType || !body.concern || !body.date || !body.time) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
+  if (!body.petBreed?.trim() || !/[a-zA-Z]/.test(body.petBreed)) {
+    return NextResponse.json({ error: "Please enter a valid pet breed" }, { status: 400 });
+  }
+  if (body.petWeight === undefined || body.petWeight === null || isNaN(Number(body.petWeight)) || Number(body.petWeight) <= 0) {
+    return NextResponse.json({ error: "Please enter a valid pet weight" }, { status: 400 });
+  }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   if (!/^\d{2}:\d{2}$/.test(body.time)) return NextResponse.json({ error: "Invalid time" }, { status: 400 });
   if (body.concern.length > 1000) return NextResponse.json({ error: "Concern must be under 1000 characters" }, { status: 400 });

@@ -148,7 +148,7 @@ export default function BookPage() {
     if (!petName.trim()) return "Please enter your pet's name.";
     if (!petType) return "Please select your pet's animal type.";
     if (petType === "Other" && !petTypeOther.trim()) return "Please describe your pet's animal type.";
-    if (!petBreed.trim()) return "Please enter your pet's breed.";
+    if (!petBreed.trim() || !/[a-zA-Z]/.test(petBreed)) return "Please enter your pet's breed.";
     if (!petDob) return "Please enter your pet's date of birth.";
     if (!petWeight || isNaN(Number(petWeight)) || Number(petWeight) <= 0) return "Please enter your pet's weight.";
     if (!petSex) return "Please select your pet's sex.";
