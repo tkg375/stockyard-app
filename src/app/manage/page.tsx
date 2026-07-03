@@ -313,13 +313,21 @@ export default function ManageConsultationPage() {
               </div>
 
               {selected.is_guest && selected.guest_token && (
-                <a
-                  href={`/guest-join?token=${encodeURIComponent(selected.guest_token)}`}
-                  className="btn btn-primary btn-full"
-                  style={{ display: "block", textAlign: "center", marginBottom: 12 }}
-                >
-                  Join My Appointment →
-                </a>
+                <>
+                  <a
+                    href={`/guest-join?token=${encodeURIComponent(selected.guest_token)}`}
+                    className="btn btn-primary btn-full"
+                    style={{ display: "block", textAlign: "center", marginBottom: 8 }}
+                  >
+                    Join My Appointment →
+                  </a>
+                  <a
+                    href={`/guest-consultation/${selected.id}?token=${encodeURIComponent(selected.guest_token)}`}
+                    style={{ display: "block", textAlign: "center", marginBottom: 12, fontSize: "0.85rem", color: "#1a6a6a", textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}
+                  >
+                    Having trouble joining? Go to your appointment page →
+                  </a>
+                </>
               )}
 
               {selected.status === "in_progress" ? (
