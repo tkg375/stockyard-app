@@ -3,6 +3,7 @@ import { useEffect, useState, useRef, useCallback, Suspense } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import SiteNav from "@/components/SiteNav";
+import TroubleModal from "@/components/TroubleModal";
 import { logCall } from "@/lib/clientLog";
 
 const VideoCallOverlay = dynamic(() => import("@/components/VideoCallOverlay"), { ssr: false });
@@ -30,6 +31,7 @@ function GuestConsultationInner() {
   const [consult, setConsult] = useState<ConsultDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [troubleOpen, setTroubleOpen] = useState(false);
 
   // Lobby state: null = not ready, "waiting" = I clicked ready, "joined" = both ready → call open
   const [lobbyState, setLobbyState] = useState<"idle" | "waiting" | "joined">("idle");
@@ -273,11 +275,14 @@ function GuestConsultationInner() {
         </div>
 
         {/* Footer links */}
-        <div style={{ textAlign: "center", fontSize: "0.8rem", color: "#aaa" }}>
-          Need to cancel?{" "}
-          <a href="/manage" style={{ color: "#1a6a6a", fontWeight: 600 }}>Manage your appointment</a>
+        <div style={{ textAlign: "center" }}>
+          <button onClick={() => setTroubleOpen(true)} style={{ background: "none", border: "none", color: "#1a6a6a", fontSize: "0.85rem", cursor: "pointer", fontWeight: 600, padding: 0, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>
+            Having Trouble?
+          </button>
         </div>
       </div>
+
+      {troubleOpen && <TroubleModal onClose={() => setTroubleOpen(false)} />}
 
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
