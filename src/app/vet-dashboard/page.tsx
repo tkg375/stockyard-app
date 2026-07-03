@@ -550,7 +550,7 @@ export default function VetDashboardPage() {
                       <div key={date} style={{ marginBottom: "28px" }}>
                         <div style={{
                           fontSize: "0.8rem", fontWeight: 700, textTransform: "uppercase",
-                          letterSpacing: "0.08em", color: "#1a6a6a", marginBottom: "12px",
+                          letterSpacing: "0.08em", color: "#fff", marginBottom: "12px",
                           display: "flex", alignItems: "center", gap: "10px",
                         }}>
                           <span>{dateLabel}</span>
