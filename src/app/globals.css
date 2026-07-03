@@ -753,7 +753,7 @@ textarea.form-input {
   font-family: var(--font-body);
   font-size: 0.88rem;
   font-weight: 600;
-  color: #1a6a6a;
+  color: #CA236F;
   cursor: pointer;
   transition: var(--transition);
   white-space: nowrap;
@@ -763,7 +763,7 @@ textarea.form-input {
 
 .dashboard-nav-desktop-btn.active {
   background: rgba(255,255,255,0.75);
-  color: #1a6a6a;
+  color: #CA236F;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
 
@@ -805,7 +805,7 @@ textarea.form-input {
   font-family: var(--font-body);
   font-size: 0.78rem;
   font-weight: 600;
-  color: #1a6a6a;
+  color: #CA236F;
   cursor: pointer;
   transition: var(--transition);
   text-align: center;
@@ -816,7 +816,7 @@ textarea.form-input {
 
 .sidebar-btn:hover {
   background-color: #ddf2f2;
-  color: #1a6a6a;
+  color: #CA236F;
 }
 
 .sidebar-btn.active {
