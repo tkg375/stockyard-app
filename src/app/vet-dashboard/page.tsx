@@ -1050,25 +1050,6 @@ export default function VetDashboardPage() {
         </div>
       )}
 
-      {/* Footer */}
-      <footer style={{ background: "transparent", color: "#1a6a6a", padding: "20px 0", textAlign: "center" }}>
-        <p style={{ opacity: 0.7, fontSize: "0.9rem", marginBottom: "12px" }}>
-          &copy; 2026 Stockyard Animal Health
-        </p>
-        <Link
-          href="/admin"
-          style={{
-            display: "inline-flex", alignItems: "center", gap: "8px",
-            padding: "8px 20px", borderRadius: "8px",
-            background: "rgba(91,196,196,0.12)", border: "1px solid rgba(91,196,196,0.35)",
-            color: "#1a6a6a", fontSize: "0.82rem", fontWeight: 600,
-            textDecoration: "none",
-          }}
-        >
-          🗄️ Database Admin
-        </Link>
-      </footer>
-
     </div>
   );
 }
