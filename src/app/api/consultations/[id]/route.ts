@@ -13,13 +13,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   const db = await getDb();
   const row = await db.prepare(`
-    SELECT c.*,
-      COALESCE(p.breed, c.pet_breed) AS pet_breed,
-      COALESCE(p.weight, c.pet_weight) AS pet_weight,
-      p.birthday_year, p.birthday_month, p.birthday_day, p.estimated_birthday
-    FROM consultations c
-    LEFT JOIN pets p ON p.id = c.pet_id
-    WHERE c.id = ?
+    SELECT * FROM consultations WHERE id = ?
   `).bind(id).first();
   if (!row) return NextResponse.json({ error: "Not found" }, { status: 404 });
 

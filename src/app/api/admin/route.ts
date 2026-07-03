@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const table = url.searchParams.get("table") ?? "consultations";
 
-  const allowed = ["consultations", "users", "pets", "messages", "promo_codes", "settings", "sessions"];
+  const allowed = ["consultations", "users", "messages", "promo_codes", "settings", "sessions"];
   if (!allowed.includes(table)) return NextResponse.json({ error: "Invalid table" }, { status: 400 });
 
   let rows;
@@ -31,16 +31,6 @@ export async function GET(req: NextRequest) {
       SELECT id, email, name, phone, address, city, state, zip, role,
         stripe_customer_id, created_at, updated_at
       FROM users ORDER BY created_at DESC
-    `).all();
-  } else if (table === "pets") {
-    rows = await db.prepare(`
-      SELECT p.id, p.name, p.type, p.breed, p.weight,
-        p.birthday_year, p.birthday_month, p.birthday_day, p.estimated_birthday,
-        p.notes, u.name AS owner_name, u.email AS owner_email,
-        p.created_at, p.updated_at
-      FROM pets p
-      LEFT JOIN users u ON u.id = p.user_id
-      ORDER BY p.created_at DESC
     `).all();
   } else if (table === "messages") {
     rows = await db.prepare(`

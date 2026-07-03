@@ -23,10 +23,6 @@ interface Consultation {
   pet_sex: string | null;
   pet_spayed_neutered: number | null;
   pet_color: string | null;
-  birthday_year: number | null;
-  birthday_month: number | null;
-  birthday_day: number | null;
-  estimated_birthday: number | null;
   concern: string;
   date: string;
   time: string;
@@ -762,10 +758,8 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
                 { label: "Type", value: c.pet_type },
                 { label: "Breed", value: c.pet_breed },
                 { label: "Weight", value: c.pet_weight != null ? `${c.pet_weight} lbs` : null },
-                { label: "Date of Birth", value: (c.birthday_year || c.birthday_month || c.birthday_day)
-                    ? [c.birthday_month, c.birthday_day, c.birthday_year].filter(Boolean).join("/") + (c.estimated_birthday ? " (est.)" : "")
-                    : c.pet_dob
-                    ? (() => { const [y,m,d] = c.pet_dob!.split("-"); return `${m}-${d}-${y} (est.)`; })()
+                { label: "Date of Birth", value: c.pet_dob
+                    ? (() => { const [y,m,d] = c.pet_dob!.split("-"); return `${m}-${d}-${y}`; })()
                     : null },
                 { label: "Sex", value: c.pet_sex },
                 { label: c.pet_sex === "Female" ? "Spayed" : "Neutered", value: c.pet_sex ? (c.pet_spayed_neutered ? "Yes" : "No") : null },

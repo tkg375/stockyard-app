@@ -4,12 +4,11 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-type TableName = "consultations" | "users" | "pets" | "messages" | "promo_codes" | "settings" | "sessions";
+type TableName = "consultations" | "users" | "messages" | "promo_codes" | "settings" | "sessions";
 
 const TABLES: { key: TableName; label: string; icon: string }[] = [
   { key: "consultations", label: "Consultations", icon: "📋" },
   { key: "users",         label: "Users",          icon: "👤" },
-  { key: "pets",          label: "Pets",            icon: "🐾" },
   { key: "messages",      label: "Messages",        icon: "💬" },
   { key: "promo_codes",   label: "Promo Codes",     icon: "🏷️" },
   { key: "settings",      label: "Settings",        icon: "⚙️" },
@@ -62,21 +61,6 @@ const COLUMNS: Record<TableName, { key: string; label: string; type?: "ts" | "ce
     { key: "stripe_customer_id", label: "Stripe ID", type: "truncate" },
     { key: "created_at",        label: "Joined",     type: "ts" },
     { key: "updated_at",        label: "Updated",    type: "ts" },
-  ],
-  pets: [
-    { key: "id",               label: "ID",           type: "truncate" },
-    { key: "name",             label: "Name" },
-    { key: "type",             label: "Type" },
-    { key: "breed",            label: "Breed" },
-    { key: "weight",           label: "Weight (lbs)" },
-    { key: "birthday_year",    label: "Birth Year" },
-    { key: "birthday_month",   label: "Birth Month" },
-    { key: "birthday_day",     label: "Birth Day" },
-    { key: "estimated_birthday", label: "Est. Birthday", type: "bool" },
-    { key: "notes",            label: "Notes",        type: "truncate" },
-    { key: "owner_name",       label: "Owner" },
-    { key: "owner_email",      label: "Owner Email" },
-    { key: "created_at",       label: "Added",        type: "ts" },
   ],
   messages: [
     { key: "id",              label: "ID",           type: "truncate" },
