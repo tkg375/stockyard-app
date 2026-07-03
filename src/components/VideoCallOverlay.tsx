@@ -158,9 +158,10 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
       log("start_call_result", { ok });
 
       if (ok && mounted) {
-        // Vet keeps heartbeating lobby_vet so customer's lobby poller always
-        // sees the vet as present, even mid-call, enabling clean reconnects.
-        if (isVet) call.startLobbyHeartbeat();
+        // Both sides keep heartbeating their own lobby presence so the other
+        // party's lobby check/poll always sees them, even mid-call, enabling
+        // clean reconnects if either side's tab crashes/reloads.
+        call.startLobbyHeartbeat();
       }
 
       if (!ok && mounted && callRef.current) close();

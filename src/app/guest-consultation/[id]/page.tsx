@@ -135,6 +135,8 @@ function GuestConsultationInner() {
     }
 
     // Write our lobby presence
+    await writeLobbyPresence();
+
     // Check if vet is already (freshly) waiting
     const res = await fetch(signalUrl("lobby_vet"));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

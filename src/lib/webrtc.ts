@@ -126,13 +126,15 @@ export class StockyardVideoCall {
   }
 
   // ── Lobby heartbeat ───────────────────────────────────────────────────────
-  // Keeps lobby_vet alive even during an active call so the customer's lobby
-  // poller sees the vet as present and can rejoin if the call drops.
+  // Keeps our own lobby_vet/lobby_customer signal alive even during an active
+  // call so the other side's lobby check/poll sees us as present and can
+  // rejoin if their tab crashes/reloads mid-call.
 
   startLobbyHeartbeat(): void {
-    if (!this.isVet || this.lobbyHeartbeatInterval) return;
+    if (this.lobbyHeartbeatInterval) return;
+    const key = this.isVet ? "lobby_vet" : "lobby_customer";
     const beat = () => {
-      if (!this.destroyed) this.signalSet("lobby_vet", { ts: Date.now() });
+      if (!this.destroyed) this.signalSet(key, { ts: Date.now() });
     };
     beat();
     this.lobbyHeartbeatInterval = setInterval(beat, 5000);
