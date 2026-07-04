@@ -25,6 +25,12 @@ export async function POST(req: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return NextResponse.json({ error: "Invalid date" }, { status: 400 });
   if (!/^\d{2}:\d{2}$/.test(body.time)) return NextResponse.json({ error: "Invalid time" }, { status: 400 });
 
+  const easternNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const appt = new Date(`${body.date}T${body.time}:00`);
+  if (appt.getTime() - easternNow.getTime() <= 30 * 60 * 1000) {
+    return NextResponse.json({ error: "Cannot book a time in the past." }, { status: 400 });
+  }
+
   const db = await getDb();
 
   const slotTaken = await db.prepare(

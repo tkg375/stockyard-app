@@ -41,29 +41,39 @@ export async function POST(req: NextRequest) {
     smsConsent?: boolean;
   };
 
+  // If the client already charged a card for this booking, any failure from
+  // here on must refund it — the charge happens before this endpoint is ever
+  // called, so a stranded PaymentIntent means the customer paid and got nothing.
+  async function fail(message: string, status: number) {
+    if (body.paymentIntentId) {
+      try { await getStripe().refunds.create({ payment_intent: body.paymentIntentId }); } catch {}
+    }
+    return NextResponse.json({ error: message }, { status });
+  }
+
   if (!body.name || !body.email || !body.petName || !body.petType || !body.concern || !body.date || !body.time) {
-    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    return fail("Missing required fields", 400);
   }
   if (!body.petBreed?.trim() || !/[a-zA-Z]/.test(body.petBreed)) {
-    return NextResponse.json({ error: "Please enter a valid pet breed" }, { status: 400 });
+    return fail("Please enter a valid pet breed", 400);
   }
   if (body.petWeight === undefined || body.petWeight === null || isNaN(Number(body.petWeight)) || Number(body.petWeight) <= 0) {
-    return NextResponse.json({ error: "Please enter a valid pet weight" }, { status: 400 });
+    return fail("Please enter a valid pet weight", 400);
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return NextResponse.json({ error: "Invalid date" }, { status: 400 });
-  if (!/^\d{2}:\d{2}$/.test(body.time)) return NextResponse.json({ error: "Invalid time" }, { status: 400 });
-  if (body.concern.length > 1000) return NextResponse.json({ error: "Concern must be under 1000 characters" }, { status: 400 });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(body.date)) return fail("Invalid date", 400);
+  if (!/^\d{2}:\d{2}$/.test(body.time)) return fail("Invalid time", 400);
+  if (body.concern.length > 1000) return fail("Concern must be under 1000 characters", 400);
 
   const agreements = body.agreements ?? {};
   if (!AGREEMENT_KEYS.every(k => agreements[k] === true)) {
-    return NextResponse.json({ error: "All agreements must be accepted" }, { status: 400 });
+    return fail("All agreements must be accepted", 400);
   }
 
   // Validate appointment time is in the future
   const easternNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
   const appt = new Date(`${body.date}T${body.time}:00`);
   if (appt.getTime() - easternNow.getTime() <= 30 * 60 * 1000) {
-    return NextResponse.json({ error: "Cannot book a time in the past." }, { status: 400 });
+    return fail("Cannot book a time in the past.", 400);
   }
 
   const db = await getDb();
@@ -93,7 +103,7 @@ export async function POST(req: NextRequest) {
     try {
       const intent = await getStripe().paymentIntents.retrieve(body.paymentIntentId);
       if (intent.status !== "succeeded") return NextResponse.json({ error: "Payment not completed." }, { status: 402 });
-      if (intent.amount !== amountCents) return NextResponse.json({ error: "Payment amount mismatch." }, { status: 400 });
+      if (intent.amount !== amountCents) return fail("Payment amount mismatch.", 400);
 
       // Prevent reuse
       const existing = await db.prepare("SELECT id FROM consultations WHERE stripe_payment_intent_id = ?")
