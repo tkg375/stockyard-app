@@ -77,7 +77,10 @@ export async function GET(req: NextRequest) {
         joinUrl,
       }, vet);
 
-      await db.prepare(`
+      // Retry the "mark as sent" write once before giving up — if it never
+      // lands, the next minute's cron run will re-send this same reminder
+      // since notif_reminder_sent is still 0.
+      const markSent = () => db.prepare(`
         UPDATE consultations SET
           notif_reminder_sent = 1,
           notif_reminder_sent_at = unixepoch(),
@@ -85,8 +88,17 @@ export async function GET(req: NextRequest) {
         WHERE id = ?
       `).bind(row.id).run();
 
+      try {
+        await markSent();
+      } catch (err) {
+        console.error(`[cron/appointment-reminder] Failed to mark reminder sent for ${row.id}, retrying:`, err);
+        await markSent();
+      }
+
       notified++;
-    } catch {}
+    } catch (err) {
+      console.error(`[cron/appointment-reminder] Reminder failed for consultation ${row.id}:`, err);
+    }
   }
 
   // ── Overdue reminders (once per day per consultation) ──────────────────────
@@ -114,12 +126,51 @@ export async function GET(req: NextRequest) {
       await sendOverdueReminderToVet(overdueRows.results, vet);
       const nowUnix = Math.floor(now.getTime() / 1000);
       for (const row of overdueRows.results) {
-        await db
-          .prepare("UPDATE consultations SET notif_overdue_last_sent = ?, updated_at = unixepoch() WHERE id = ?")
-          .bind(nowUnix, row.id)
-          .run();
+        // Per-row try/catch so one row's DB error doesn't block marking the
+        // rest — otherwise every row after the failure gets re-included in
+        // tomorrow's (and every subsequent) overdue email indefinitely.
+        try {
+          await db
+            .prepare("UPDATE consultations SET notif_overdue_last_sent = ?, updated_at = unixepoch() WHERE id = ?")
+            .bind(nowUnix, row.id)
+            .run();
+        } catch (err) {
+          console.error(`[cron/appointment-reminder] Failed to mark overdue reminder sent for ${row.id}:`, err);
+        }
       }
-    } catch {}
+    } catch (err) {
+      console.error("[cron/appointment-reminder] Overdue vet notification failed:", err);
+    }
+  }
+
+  // ── Housekeeping: prune tables that otherwise grow forever ─────────────────
+  // Gated to once a day (this cron runs every minute) since none of these
+  // need minute-level freshness — they're all "delete stuff that's obviously
+  // stale" sweeps, not correctness-critical.
+  if (nowTime === "03:00") {
+    const nowUnix = Math.floor(now.getTime() / 1000);
+    const DAY = 24 * 60 * 60;
+    const cleanupTasks: Array<[string, () => Promise<unknown>]> = [
+      // Rate-limit windows are all well under a day long, so anything this
+      // old is long expired and just dead weight.
+      ["rate_limits", () => db.prepare("DELETE FROM rate_limits WHERE window_start < ?").bind(nowUnix - DAY).run()],
+      // Matches the 30-day TTL noted where these rows are written.
+      ["processed_webhook_events", () => db.prepare("DELETE FROM processed_webhook_events WHERE processed_at < ?").bind(nowUnix - 30 * DAY).run()],
+      // Already-expired login sessions — filtered out on read but never removed.
+      ["sessions", () => db.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(nowUnix).run()],
+      // Diagnostic call logs — keep 90 days, plenty for debugging a recent call.
+      ["call_logs", () => db.prepare("DELETE FROM call_logs WHERE created_at < ?").bind(nowUnix - 90 * DAY).run()],
+      // Backstop for calls that ended abnormally (crash/closed tab) without
+      // the client ever calling DELETE on its signal rows.
+      ["webrtc_signals", () => db.prepare("DELETE FROM webrtc_signals WHERE updated_at < ?").bind(nowUnix - DAY).run()],
+    ];
+    for (const [table, task] of cleanupTasks) {
+      try {
+        await task();
+      } catch (err) {
+        console.error(`[cron/appointment-reminder] Cleanup failed for ${table}:`, err);
+      }
+    }
   }
 
   return NextResponse.json({ checked: true, notified, overdueReminded: overdueRows.results.length });

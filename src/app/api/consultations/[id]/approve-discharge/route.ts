@@ -43,12 +43,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     } catch { /* non-critical */ }
   }
 
-  const now = Math.floor(Date.now() / 1000);
   await db.prepare(`
     UPDATE consultations
-    SET ai_summary = ?, ai_summary_approved = 1, discharge_sent = 1, discharge_sent_at = ?, updated_at = unixepoch()
+    SET ai_summary = ?, ai_summary_approved = 1, updated_at = unixepoch()
     WHERE id = ?
-  `).bind(body.summary.trim(), now, id).run();
+  `).bind(body.summary.trim(), id).run();
 
   const sent = await sendDischargeEmail({
     petName: row.pet_name,
@@ -61,6 +60,17 @@ export async function POST(req: NextRequest, { params }: Params) {
     summary: body.summary.trim(),
     agreements: agreementsData,
   });
+
+  // discharge_sent should reflect whether the email actually went out —
+  // sendEmail swallows its own errors and returns false rather than
+  // throwing, so without this check a failed send would be permanently
+  // recorded as delivered with no way to tell the customer never got it.
+  if (sent) {
+    const now = Math.floor(Date.now() / 1000);
+    await db.prepare(`UPDATE consultations SET discharge_sent = 1, discharge_sent_at = ? WHERE id = ?`).bind(now, id).run();
+  } else {
+    console.error(`Discharge email failed to send for consultation ${id}`);
+  }
 
   return NextResponse.json({ ok: true, emailSent: sent });
 }

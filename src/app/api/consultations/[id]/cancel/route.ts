@@ -129,6 +129,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       name: vetName?.value ?? "Dr. McMillen",
       email: vetEmail?.value ?? "",
       phone: vetSmsOptIn?.value === "1" ? (vetPhone?.value ?? "") : "",
+    }).then((result) => {
+      // sendEmail/sendSMS swallow their own errors and resolve to false rather
+      // than throwing, so this is the only place a delivery failure surfaces —
+      // without it, a customer could be refunded and never actually told.
+      if (!result.customer) console.error(`Cancellation notification to customer failed for consultation ${id}`);
+      if (!result.vet) console.error(`Cancellation notification to vet failed for consultation ${id}`);
     }).catch((err) => console.error("Cancellation notification failed for consultation", id, err))
   );
 

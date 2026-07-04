@@ -267,9 +267,14 @@ export async function POST(req: NextRequest) {
     }) : Promise.resolve(false),
     // Vet SMS
     vetPhoneVal ? sendSMS(vetPhoneVal, `New guest booking: ${body.name} — ${body.petName} (${body.petType}) on ${body.date} at ${ft} EST`) : Promise.resolve(false),
-  ]).then(() =>
-    db.prepare(`UPDATE consultations SET notif_confirmation_sent = 1, notif_confirmation_sent_at = unixepoch(), updated_at = unixepoch() WHERE id = ?`).bind(id).run()
-  ).catch(err => console.error("Notification failed for consultation", id, err)));
+  ]).then(([customerEmailOk]) => {
+    // sendEmail/sendSMS swallow their own errors and resolve to false rather
+    // than throwing, so this is the only place a delivery failure surfaces.
+    // The customer confirmation email carries the video-call join link, so
+    // its failure is the one worth calling out specifically.
+    if (!customerEmailOk) console.error(`Booking confirmation email failed to send for consultation ${id}`);
+    return db.prepare(`UPDATE consultations SET notif_confirmation_sent = 1, notif_confirmation_sent_at = unixepoch(), updated_at = unixepoch() WHERE id = ?`).bind(id).run();
+  }).catch(err => console.error("Notification failed for consultation", id, err)));
 
   return NextResponse.json({ id, guestToken }, { status: 201 });
 }

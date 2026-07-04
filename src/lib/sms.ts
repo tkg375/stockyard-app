@@ -36,8 +36,13 @@ export async function sendSMS(phone: string, message: string): Promise<boolean> 
         body: new URLSearchParams({ To: formatted, From: from, Body: message }).toString(),
       }
     );
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error("[sendSMS] Twilio error", res.status, errText);
+    }
     return res.ok;
-  } catch {
+  } catch (err) {
+    console.error("[sendSMS] fetch error", err);
     return false;
   }
 }
