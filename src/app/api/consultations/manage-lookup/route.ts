@@ -17,10 +17,15 @@ export async function GET(req: NextRequest) {
   const allowed = await checkRateLimit(`manage-lookup:${ip}`, 10, 60);
   if (!allowed) return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
 
-  const db = await getDb();
-
   const column = type === "email" ? "user_email" : "user_phone";
   const normalizedValue = type === "phone" ? value.replace(/\D/g, "") : value.toLowerCase();
+
+  // Rate-limit by the looked-up identifier too, not just IP — otherwise a
+  // single known email/phone can be scraped repeatedly from many IPs.
+  const identifierAllowed = await checkRateLimit(`manage-lookup-id:${column}:${normalizedValue}`, 5, 3600);
+  if (!identifierAllowed) return NextResponse.json({ error: "Too many requests. Please wait a moment." }, { status: 429 });
+
+  const db = await getDb();
 
   const rows = await db.prepare(`
     SELECT id, pet_name, pet_type, concern, date, time, status, payment_status, amount_cents, user_name, guest_token, is_guest

@@ -57,8 +57,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (user.role !== "vet") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json() as Record<string, string | number | null>;
-  // stripe_payment_intent_id and stripe_refund_id intentionally excluded — set only by payment code paths
-  const allowed = ["status", "payment_status", "daily_room_url", "notes", "completed_at", "pharmacy_name", "pharmacy_address", "pharmacy_phone", "pharmacy_fax", "pharmacy_email"];
+  // payment_status, stripe_payment_intent_id, and stripe_refund_id intentionally
+  // excluded — payment state is only ever set by the Stripe/webhook code paths.
+  const allowed = ["status", "daily_room_url", "notes", "completed_at", "pharmacy_name", "pharmacy_address", "pharmacy_phone", "pharmacy_fax", "pharmacy_email"];
   const sets: string[] = [];
   const vals: (string | number | null)[] = [];
 

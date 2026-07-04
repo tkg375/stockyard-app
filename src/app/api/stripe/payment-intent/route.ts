@@ -42,8 +42,9 @@ export async function POST(req: NextRequest) {
   const customerId = consultation.stripe_customer_id;
   if (!customerId) return NextResponse.json({ error: "No Stripe customer on file" }, { status: 400 });
 
+  let paymentIntent;
   try {
-    const paymentIntent = await getStripe().paymentIntents.create({
+    paymentIntent = await getStripe().paymentIntents.create({
       amount,
       currency: "usd",
       customer: customerId,
@@ -52,19 +53,13 @@ export async function POST(req: NextRequest) {
       confirm: true,
       receipt_email: user.email,
       metadata: { consultationId },
+    }, {
+      // Retrying this request (e.g. after a network blip) must not create a
+      // second charge — scope the key to this consultation's one payment attempt.
+      idempotencyKey: `book-charge-${consultationId}`,
     });
-
-    await db.prepare(`
-      UPDATE consultations SET
-        payment_status = 'paid',
-        stripe_payment_intent_id = ?,
-        updated_at = unixepoch()
-      WHERE id = ?
-    `).bind(paymentIntent.id, consultationId).run();
-
-    return NextResponse.json({ ok: true, paymentIntentId: paymentIntent.id, status: paymentIntent.status });
   } catch {
-    // Mark as failed and notify
+    // The Stripe call itself failed — no charge was made. Safe to mark failed and notify.
     await db.prepare(`
       UPDATE consultations SET payment_status = 'failed', updated_at = unixepoch() WHERE id = ?
     `).bind(consultationId).run();
@@ -89,4 +84,35 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: "Payment failed" }, { status: 402 });
   }
+
+  // Charge succeeded. From here, never report failure to the customer or send
+  // a "payment failed" notification — a DB hiccup below is an internal
+  // bookkeeping problem, not a payment problem. The webhook handler will
+  // reconcile payment_status once stripe_payment_intent_id is recorded.
+  const recordCharge = () => db.prepare(`
+    UPDATE consultations SET
+      payment_status = 'paid',
+      stripe_payment_intent_id = ?,
+      updated_at = unixepoch()
+    WHERE id = ?
+  `).bind(paymentIntent!.id, consultationId).run();
+
+  try {
+    await recordCharge();
+  } catch (dbErr) {
+    console.error(`[payment-intent] Charge ${paymentIntent.id} succeeded but DB update failed for consultation ${consultationId}, retrying:`, dbErr);
+    try {
+      await recordCharge();
+    } catch (dbErr2) {
+      console.error(`[payment-intent] Retry also failed for consultation ${consultationId} — attempting to at least record the payment intent id for webhook reconciliation:`, dbErr2);
+      try {
+        await db.prepare(`UPDATE consultations SET stripe_payment_intent_id = ?, updated_at = unixepoch() WHERE id = ?`)
+          .bind(paymentIntent.id, consultationId).run();
+      } catch (dbErr3) {
+        console.error(`[payment-intent] CRITICAL: consultation ${consultationId} charged (${paymentIntent.id}) but no DB record could be written — needs manual reconciliation:`, dbErr3);
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, paymentIntentId: paymentIntent.id, status: paymentIntent.status });
 }

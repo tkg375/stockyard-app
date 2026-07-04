@@ -25,12 +25,14 @@ export async function POST(req: NextRequest) {
 
   const db = await getDb();
 
-  // Idempotency: skip events we've already processed
-  const alreadyProcessed = await db
-    .prepare("SELECT 1 FROM processed_webhook_events WHERE event_id = ?")
+  // Idempotency: claim this event before doing any work. INSERT OR IGNORE is
+  // atomic, so two concurrent redeliveries of the same event can't both pass
+  // a check-then-act race the way a SELECT-then-INSERT would.
+  const claimed = await db
+    .prepare("INSERT OR IGNORE INTO processed_webhook_events (event_id, processed_at) VALUES (?, unixepoch())")
     .bind(event.id)
-    .first();
-  if (alreadyProcessed) return NextResponse.json({ received: true });
+    .run();
+  if (claimed.meta.changes === 0) return NextResponse.json({ received: true });
 
   switch (event.type) {
     case "payment_intent.succeeded": {
@@ -72,12 +74,6 @@ export async function POST(req: NextRequest) {
       break;
     }
   }
-
-  // Record event as processed (TTL: keep 30 days, cleaned up lazily)
-  await db
-    .prepare("INSERT OR IGNORE INTO processed_webhook_events (event_id, processed_at) VALUES (?, unixepoch())")
-    .bind(event.id)
-    .run();
 
   return NextResponse.json({ received: true });
 }

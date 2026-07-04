@@ -38,6 +38,19 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: "Cannot cancel a consultation that has already started" }, { status: 422 });
   }
 
+  // Atomically claim the cancellation before touching Stripe, so two
+  // near-simultaneous cancel requests (e.g. this endpoint racing with
+  // guest-cancel) can't both attempt to refund the same payment intent.
+  const claim = await db.prepare(`
+    UPDATE consultations SET status = 'cancelled', cancelled_at = unixepoch(), cancelled_by = ?, updated_at = unixepoch()
+    WHERE id = ? AND status NOT IN ('cancelled', 'completed')
+  `).bind(user.id, id).run();
+  if (claim.meta.changes === 0) {
+    const current = await db.prepare("SELECT status, payment_status FROM consultations WHERE id = ?").bind(id).first<{ status: string; payment_status: string }>();
+    if (current?.status === "cancelled") return NextResponse.json({ ok: true, message: "Already cancelled", refunded: current.payment_status === "refunded" });
+    return NextResponse.json({ error: "Cannot cancel a completed consultation" }, { status: 422 });
+  }
+
   let refunded = false;
   let refundId: string | null = null;
 
@@ -57,8 +70,13 @@ export async function POST(req: NextRequest, { params }: Params) {
         refundId = refund.id;
       }
     } catch (err) {
+      // The appointment is already claimed as cancelled above (it's off the
+      // calendar either way), so record that the refund needs manual
+      // follow-up rather than leaving payment_status stale at "paid".
+      await db.prepare(`UPDATE consultations SET payment_status = 'refund_failed', updated_at = unixepoch() WHERE id = ?`).bind(id).run();
       const msg = err instanceof Error ? err.message : "Refund failed";
-      return NextResponse.json({ error: `Could not process refund: ${msg}` }, { status: 502 });
+      console.error(`Refund failed for cancelled consultation ${id}:`, err);
+      return NextResponse.json({ error: `Cancelled, but could not process refund: ${msg}` }, { status: 502 });
     }
   } else if (row.stripe_payment_method_id) {
     try { await getStripe().paymentMethods.detach(row.stripe_payment_method_id); } catch {}
@@ -66,14 +84,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   await db.prepare(`
     UPDATE consultations SET
-      status = 'cancelled',
       payment_status = ?,
-      cancelled_at = unixepoch(),
-      cancelled_by = ?,
       stripe_refund_id = ?,
       updated_at = unixepoch()
     WHERE id = ?
-  `).bind(refunded ? "refunded" : "voided", user.id, refundId, id).run();
+  `).bind(refunded ? "refunded" : "voided", refundId, id).run();
 
   // Fetch card last4 for the cancellation email
   let cardLast4: string | null = null;

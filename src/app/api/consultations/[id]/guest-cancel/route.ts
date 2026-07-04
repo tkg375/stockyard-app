@@ -49,6 +49,20 @@ export async function POST(req: NextRequest, { params }: Params) {
   if (row.status === "completed") return NextResponse.json({ error: "Cannot cancel a completed consultation" }, { status: 422 });
   if (row.status === "in_progress") return NextResponse.json({ error: "Cannot cancel a consultation that has already started" }, { status: 422 });
 
+  // Atomically claim the cancellation before touching Stripe, so this
+  // endpoint racing with the authenticated /cancel endpoint (or a duplicate
+  // guest-cancel double-click) can't both attempt to refund the same intent.
+  const claim = await db.prepare(`
+    UPDATE consultations SET status = 'cancelled', cancelled_at = unixepoch(), cancelled_by = 'guest', updated_at = unixepoch()
+    WHERE id = ? AND status NOT IN ('cancelled', 'completed', 'in_progress')
+  `).bind(id).run();
+  if (claim.meta.changes === 0) {
+    const current = await db.prepare("SELECT status, payment_status FROM consultations WHERE id = ?").bind(id).first<{ status: string; payment_status: string }>();
+    if (current?.status === "cancelled") return NextResponse.json({ ok: true, refunded: current.payment_status === "refunded" });
+    if (current?.status === "in_progress") return NextResponse.json({ error: "Cannot cancel a consultation that has already started" }, { status: 422 });
+    return NextResponse.json({ error: "Cannot cancel a completed consultation" }, { status: 422 });
+  }
+
   let refunded = false;
   let refundId: string | null = null;
 
@@ -64,17 +78,16 @@ export async function POST(req: NextRequest, { params }: Params) {
         refundId = refund.id;
       }
     } catch (err) {
+      await db.prepare(`UPDATE consultations SET payment_status = 'refund_failed', updated_at = unixepoch() WHERE id = ?`).bind(id).run();
       const msg = err instanceof Error ? err.message : "Refund failed";
-      return NextResponse.json({ error: `Could not process refund: ${msg}` }, { status: 502 });
+      console.error(`Refund failed for guest-cancelled consultation ${id}:`, err);
+      return NextResponse.json({ error: `Cancelled, but could not process refund: ${msg}` }, { status: 502 });
     }
   }
 
   await db.prepare(`
     UPDATE consultations SET
-      status = 'cancelled',
       payment_status = ?,
-      cancelled_at = unixepoch(),
-      cancelled_by = 'guest',
       stripe_refund_id = ?,
       updated_at = unixepoch()
     WHERE id = ?

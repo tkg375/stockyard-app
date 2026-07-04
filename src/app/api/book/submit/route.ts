@@ -83,9 +83,13 @@ export async function POST(req: NextRequest) {
   let promoType = "";
   let validatedPromoCode: string | null = null;
   if (body.promoCode) {
-    const promo = await db.prepare("SELECT discount, type FROM promo_codes WHERE code = ? AND active = 1")
-      .bind(body.promoCode.toUpperCase()).first<{ discount: number; type: string }>();
-    if (promo) { promoDiscount = promo.discount; promoType = promo.type; validatedPromoCode = body.promoCode.toUpperCase(); }
+    const promo = await db.prepare("SELECT discount, type, max_uses, uses_count, expires_at FROM promo_codes WHERE code = ? AND active = 1")
+      .bind(body.promoCode.toUpperCase()).first<{ discount: number; type: string; max_uses: number | null; uses_count: number; expires_at: number | null }>();
+    const now = Math.floor(Date.now() / 1000);
+    const promoValid = promo
+      && (promo.expires_at === null || promo.expires_at > now)
+      && (promo.max_uses === null || promo.uses_count < promo.max_uses);
+    if (promoValid) { promoDiscount = promo.discount; promoType = promo.type; validatedPromoCode = body.promoCode.toUpperCase(); }
   }
 
   const basePrice = 6000;
@@ -138,35 +142,66 @@ export async function POST(req: NextRequest) {
   const phone = body.phone?.trim().replace(/\D/g, "") || null;
   const smsConsent = body.smsConsent === true ? 1 : 0;
 
-  try {
-    await db.prepare(`
-      INSERT INTO consultations
-        (id, user_id, user_name, user_email, user_phone, pet_name, pet_type, pet_breed, pet_dob, pet_weight,
-         pet_sex, pet_spayed_neutered, pet_color,
-         concern, date, time, status, payment_status, stripe_payment_intent_id, stripe_customer_id,
-         amount_cents, promo_code, promo_discount, promo_type,
-         agreements_json, agreements_signed_at, agreements_client_name,
-         pharmacy_name, pharmacy_address, pharmacy_phone,
-         sms_consent, is_guest, guest_token)
-      VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-    `).bind(
-      id, body.name, body.email, phone,
-      body.petName, body.petType, body.petBreed ?? null, body.petDob ?? null, body.petWeight ?? null,
-      body.petSex ?? null, body.petSpayedNeutered ? 1 : 0, body.petColor ?? null,
-      body.concern, body.date, body.time,
-      paymentStatus, stripePaymentIntentId, body.stripeCustomerId ?? null,
-      amountCents, validatedPromoCode, promoDiscount || null, promoType || null,
-      JSON.stringify(agreements), body.agreementsSignedAt ?? Math.floor(Date.now() / 1000),
-      body.name,
-      body.pharmacyName ?? null, body.pharmacyAddress ?? null, body.pharmacyPhone ?? null,
-      smsConsent, guestToken
-    ).run();
-  } catch (dbErr) {
+  const insertConsultation = () => db.prepare(`
+    INSERT INTO consultations
+      (id, user_id, user_name, user_email, user_phone, pet_name, pet_type, pet_breed, pet_dob, pet_weight,
+       pet_sex, pet_spayed_neutered, pet_color,
+       concern, date, time, status, payment_status, stripe_payment_intent_id, stripe_customer_id,
+       amount_cents, promo_code, promo_discount, promo_type,
+       agreements_json, agreements_signed_at, agreements_client_name,
+       pharmacy_name, pharmacy_address, pharmacy_phone,
+       sms_consent, is_guest, guest_token)
+    VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+  `).bind(
+    id, body.name, body.email, phone,
+    body.petName, body.petType, body.petBreed ?? null, body.petDob ?? null, body.petWeight ?? null,
+    body.petSex ?? null, body.petSpayedNeutered ? 1 : 0, body.petColor ?? null,
+    body.concern, body.date, body.time,
+    paymentStatus, stripePaymentIntentId, body.stripeCustomerId ?? null,
+    amountCents, validatedPromoCode, promoDiscount || null, promoType || null,
+    JSON.stringify(agreements), body.agreementsSignedAt ?? Math.floor(Date.now() / 1000),
+    body.name,
+    body.pharmacyName ?? null, body.pharmacyAddress ?? null, body.pharmacyPhone ?? null,
+    smsConsent, guestToken
+  ).run();
+
+  let inserted = false;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 2 && !inserted; attempt++) {
+    try {
+      await insertConsultation();
+      inserted = true;
+    } catch (dbErr) {
+      lastErr = dbErr;
+    }
+  }
+
+  if (!inserted) {
+    // A concurrent duplicate submit (e.g. double-click) racing on the same
+    // payment intent can lose a UNIQUE constraint race here even though a
+    // sibling request already inserted the real booking. Don't refund a
+    // payment that a successful booking still depends on — check first.
     if (stripePaymentIntentId) {
+      const winner = await db.prepare("SELECT id, guest_token FROM consultations WHERE stripe_payment_intent_id = ?")
+        .bind(stripePaymentIntentId).first<{ id: string; guest_token: string }>();
+      if (winner) {
+        return NextResponse.json({ id: winner.id, guestToken: winner.guest_token }, { status: 201 });
+      }
       try { await getStripe().refunds.create({ payment_intent: stripePaymentIntentId }); } catch {}
     }
-    console.error("Consultation insert failed:", dbErr);
+    console.error("Consultation insert failed after retry:", lastErr);
     return NextResponse.json({ error: "Booking failed. You have not been charged." }, { status: 500 });
+  }
+
+  if (validatedPromoCode) {
+    // Atomic increment guarded by the same limit check — if two concurrent
+    // bookings race for the last use, only one increments successfully. The
+    // loser already has a valid paid booking at this point regardless, so we
+    // don't roll anything back; this just prevents the counter overshooting.
+    await db.prepare(`
+      UPDATE promo_codes SET uses_count = uses_count + 1
+      WHERE code = ? AND (max_uses IS NULL OR uses_count < max_uses)
+    `).bind(validatedPromoCode).run();
   }
 
   // Fetch vet info and send notifications

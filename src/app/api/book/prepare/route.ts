@@ -41,10 +41,14 @@ export async function POST(req: NextRequest) {
   let promoDiscount = 0;
   let promoType = "";
   if (body.promoCode) {
-    const promo = await db.prepare("SELECT discount, type FROM promo_codes WHERE code = ? AND active = 1")
+    const promo = await db.prepare("SELECT discount, type, max_uses, uses_count, expires_at FROM promo_codes WHERE code = ? AND active = 1")
       .bind(body.promoCode.toUpperCase())
-      .first<{ discount: number; type: string }>();
-    if (promo) { promoDiscount = promo.discount; promoType = promo.type; }
+      .first<{ discount: number; type: string; max_uses: number | null; uses_count: number; expires_at: number | null }>();
+    const now = Math.floor(Date.now() / 1000);
+    const promoValid = promo
+      && (promo.expires_at === null || promo.expires_at > now)
+      && (promo.max_uses === null || promo.uses_count < promo.max_uses);
+    if (promoValid) { promoDiscount = promo.discount; promoType = promo.type; }
   }
 
   const basePrice = 6000;
