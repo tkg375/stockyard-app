@@ -90,10 +90,13 @@ function GuestConsultationInner() {
       }
       // Heartbeat our presence so the vet sees us as live, then check if the vet is ready.
       writeLobbyPresence();
-      const res = await fetch(signalUrl("lobby_vet"));
-      if (!res.ok) return;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await res.json() as any;
+      let data: any = {};
+      try {
+        const res = await fetch(signalUrl("lobby_vet"));
+        if (!res.ok) return;
+        data = await res.json();
+      } catch { return; } // transient — next tick retries
       if (data.lobby_vet) {
         clearInterval(lobbyPollRef.current!);
         lobbyPollRef.current = null;
@@ -140,9 +143,12 @@ function GuestConsultationInner() {
     await writeLobbyPresence();
 
     // Check if vet is already (freshly) waiting
-    const res = await fetch(signalUrl("lobby_vet"));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = await res.json() as any;
+    let data: any = {};
+    try {
+      const res = await fetch(signalUrl("lobby_vet"));
+      if (res.ok) data = await res.json();
+    } catch { /* fall through to polling */ }
     if (data.lobby_vet) {
       logCall(id, "customer", "lobby_joined", { via: "immediate" });
       setLobbyState("joined");

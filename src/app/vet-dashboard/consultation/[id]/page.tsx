@@ -321,15 +321,18 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
     // fresh offer exists) any offer/answer/ice present is necessarily stale — the
     // customer, as callee, produces no negotiation signals until our offer appears. We do
     // NOT clear lobby_* keys (the client may already be waiting and heartbeating).
-    await fetch(`/api/consultations/${id}/signal?keys=offer,answer,ice_vet,ice_customer,ready_vet,ready_customer`, { method: "DELETE" }).catch(() => {});
+    await fetch(`/api/consultations/${id}/signal?keys=offer,answer,ice_vet,ice_customer,ready_vet,ready_customer,bye`, { method: "DELETE" }).catch(() => {});
 
     // Write our lobby presence
     await writeLobbyPresence();
 
     // Check if customer is already (freshly) waiting
-    const res = await fetch(`/api/consultations/${id}/signal?keys=lobby_customer`);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = await res.json() as any;
+    let data: any = {};
+    try {
+      const res = await fetch(`/api/consultations/${id}/signal?keys=lobby_customer`);
+      if (res.ok) data = await res.json();
+    } catch { /* fall through to polling */ }
     setVetReadyLoading(false);
     if (data.lobby_customer) {
       logCall(id, "vet", "lobby_joined", { via: "immediate" });
@@ -352,9 +355,13 @@ export default function ConsultationDetailPage({ params }: { params: Promise<{ i
         }
         // Heartbeat our presence so the client sees us as live, then check if they're ready.
         writeLobbyPresence();
-        const r = await fetch(`/api/consultations/${id}/signal?keys=lobby_customer`);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const d = await r.json() as any;
+        let d: any = {};
+        try {
+          const r = await fetch(`/api/consultations/${id}/signal?keys=lobby_customer`);
+          if (!r.ok) return;
+          d = await r.json();
+        } catch { return; } // transient — next tick retries
         if (d.lobby_customer) {
           clearInterval(lobbyPollRef.current!);
           lobbyPollRef.current = null;

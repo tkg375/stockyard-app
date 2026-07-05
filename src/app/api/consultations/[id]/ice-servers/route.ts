@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromRequest } from "@/lib/auth";
 import { getDb } from "@/lib/db";
+import { logCallEvent } from "@/lib/callLog";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,11 +33,17 @@ export async function GET(req: NextRequest, { params }: Params) {
   const keyId = process.env.CF_TURN_KEY_ID;
   const apiToken = process.env.CF_TURN_API_TOKEN;
 
+  // STUN-only degradation is the right call (a call on a friendly NAT still
+  // works), but it must be observable: without a log row, a TURN outage is
+  // indistinguishable from "the customer's network is hostile" when
+  // diagnosing failed calls after the fact.
+  const stunFallback = async (reason: string) => {
+    await logCallEvent(db, { consultationId: id, role: "server", event: "turn_fallback", detail: { reason } });
+    return NextResponse.json({ iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }] });
+  };
+
   if (!keyId || !apiToken) {
-    // Fallback to Cloudflare public STUN if TURN keys not configured
-    return NextResponse.json({
-      iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
-    });
+    return stunFallback("turn_keys_not_configured");
   }
 
   try {
@@ -55,13 +62,13 @@ export async function GET(req: NextRequest, { params }: Params) {
     if (!res.ok) {
       const err = await res.text().catch(() => "");
       console.error("[ice-servers] CF TURN error", res.status, err);
-      return NextResponse.json({ iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }] });
+      return stunFallback(`cf_api_${res.status}`);
     }
 
     const data = await res.json() as { iceServers: unknown[] };
     return NextResponse.json({ iceServers: data.iceServers });
   } catch (err) {
     console.error("[ice-servers] fetch error", err);
-    return NextResponse.json({ iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }] });
+    return stunFallback("cf_api_fetch_error");
   }
 }

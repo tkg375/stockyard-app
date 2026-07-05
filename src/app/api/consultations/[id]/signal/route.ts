@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const auth = await authorize(req, id);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const VALID_SIGNAL_KEYS = ["offer", "answer", "ice_vet", "ice_customer", "video_rotation", "ready_vet", "ready_customer", "lobby_vet", "lobby_customer"];
+  const VALID_SIGNAL_KEYS = ["offer", "answer", "ice_vet", "ice_customer", "video_rotation", "ready_vet", "ready_customer", "lobby_vet", "lobby_customer", "bye"];
   const keys = (req.nextUrl.searchParams.get("keys")?.split(",") ?? VALID_SIGNAL_KEYS)
     .filter(k => VALID_SIGNAL_KEYS.includes(k));
   if (!keys.length) return NextResponse.json({});
@@ -74,7 +74,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { key, data } = await req.json() as { key: string; data: unknown };
-  const VALID_KEYS = new Set(["offer", "answer", "ice_vet", "ice_customer", "video_rotation", "ready_vet", "ready_customer", "lobby_vet", "lobby_customer"]);
+  // Role-scoped: each side may only write its own signal keys, so a guest
+  // can't post an offer or impersonate vet lobby presence (and vice versa).
+  const SHARED_KEYS = ["video_rotation", "bye"];
+  const VALID_KEYS = new Set(
+    auth.user.role === "vet"
+      ? ["offer", "ice_vet", "ready_vet", "lobby_vet", ...SHARED_KEYS]
+      : ["answer", "ice_customer", "ready_customer", "lobby_customer", ...SHARED_KEYS]
+  );
   if (!key || !VALID_KEYS.has(key)) return NextResponse.json({ error: "Invalid signal key" }, { status: 400 });
   if (data === undefined) return NextResponse.json({ error: "Missing data" }, { status: 400 });
   if (JSON.stringify(data).length > 65536) return NextResponse.json({ error: "Signal data too large" }, { status: 413 });
@@ -100,7 +107,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const auth = await authorize(req, id);
   if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const VALID_SIGNAL_KEYS = ["offer", "answer", "ice_vet", "ice_customer", "video_rotation", "ready_vet", "ready_customer", "lobby_vet", "lobby_customer"];
+  // The vet owns session lifecycle (pre-session wipe, reconnect wipe) and may
+  // delete any key; the customer may only delete its own rows so it can't
+  // destroy the vet's live offer/ICE mid-negotiation.
+  const VALID_SIGNAL_KEYS = auth.user.role === "vet"
+    ? ["offer", "answer", "ice_vet", "ice_customer", "video_rotation", "ready_vet", "ready_customer", "lobby_vet", "lobby_customer", "bye"]
+    : ["answer", "ice_customer", "ready_customer", "lobby_customer"];
   const keysParam = req.nextUrl.searchParams.get("keys");
 
   if (keysParam) {
@@ -109,8 +121,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       const placeholders = keys.map(() => "?").join(",");
       await auth.db.prepare(`DELETE FROM webrtc_signals WHERE consultation_id = ? AND key IN (${placeholders})`).bind(id, ...keys).run();
     }
-  } else {
+  } else if (auth.user.role === "vet") {
     await auth.db.prepare("DELETE FROM webrtc_signals WHERE consultation_id = ?").bind(id).run();
+  } else {
+    const placeholders = VALID_SIGNAL_KEYS.map(() => "?").join(",");
+    await auth.db.prepare(`DELETE FROM webrtc_signals WHERE consultation_id = ? AND key IN (${placeholders})`).bind(id, ...VALID_SIGNAL_KEYS).run();
   }
   return NextResponse.json({ ok: true });
 }

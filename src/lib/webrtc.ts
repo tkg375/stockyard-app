@@ -41,6 +41,8 @@ export class StockyardVideoCall {
   onError: ((code: CallErrorCode, message: string) => void) | null = null;
   onWaiting: (() => void) | null = null;
   onReconnecting: ((attempt: number, max: number) => void) | null = null;
+  // Remote side ended the call cleanly (posted a "bye" signal)
+  onRemoteBye: (() => void) | null = null;
 
   private pollers: ReturnType<typeof setInterval>[] = [];
   private processedIceCounts = { vet: 0, customer: 0 };
@@ -55,6 +57,14 @@ export class StockyardVideoCall {
 
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  // Separate from reconnectTimer: the short "disconnected" grace delay. Keeping
+  // them distinct means a "failed" transition can cancel the grace period and
+  // reconnect immediately without being blocked by (or clobbering) a real
+  // scheduled reconnect.
+  private graceTimer: ReturnType<typeof setTimeout> | null = null;
+  // SDP of the last offer we answered — lets the customer skip re-answering a
+  // stale offer after a reconnect and wait for the vet's fresh one instead.
+  private lastAnsweredOfferSdp: string | null = null;
   private lobbyHeartbeatInterval: ReturnType<typeof setInterval> | null = null;
   private pollerTimeouts: ReturnType<typeof setTimeout>[] = [];
   private signalGetFailures = 0;
@@ -232,15 +242,23 @@ export class StockyardVideoCall {
         // Reset reconnect counter on a clean connection
         this.reconnectAttempts = 0;
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+        if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
       } else if (state === "disconnected") {
-        // Short grace period — Chrome briefly goes "disconnected" on packet loss
-        this.reconnectTimer = setTimeout(() => {
-          this.reconnectTimer = null;
-          if (!this.destroyed && this.peerConnection?.connectionState === "disconnected") {
+        // Short grace period — Chrome briefly goes "disconnected" on packet loss.
+        // The timer also fires if the state has since moved to "failed": Chrome's
+        // normal sequence is disconnected → failed, and the old code checking
+        // only for "disconnected" here meant that sequence never reconnected.
+        if (this.graceTimer || this.reconnectTimer) return;
+        this.graceTimer = setTimeout(() => {
+          this.graceTimer = null;
+          const s = this.peerConnection?.connectionState;
+          if (!this.destroyed && (s === "disconnected" || s === "failed")) {
             this.scheduleReconnect();
           }
         }, 3000);
       } else if (state === "failed") {
+        // Definitive — skip any pending grace period and reconnect now
+        if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
         this.scheduleReconnect();
       }
     };
@@ -262,25 +280,42 @@ export class StockyardVideoCall {
       this.iceBatchTimer = null;
       if (this.destroyed) return;
       const key = this.isVet ? "ice_vet" : "ice_customer";
-      const batch = [...this.localIceCandidates];
-      this.localIceCandidates = [];
-      // signalSet retries internally — candidates will be delivered
-      await this.signalSet(key, { candidates: batch });
+      // Always POST the FULL cumulative list, never just the new batch: the
+      // signal row is replaced wholesale on every POST and the remote poller
+      // indexes into it by count. Posting only the latest batch made every
+      // batch after the first (typically the TURN relay candidates, which
+      // trickle in last) overwrite and permanently lose the earlier ones —
+      // or vice versa, losing the relay candidates entirely.
+      await this.signalSet(key, { candidates: [...this.localIceCandidates] });
     }, 200);
   }
 
   private startIcePoller(): void {
     const remoteKey = this.isVet ? "ice_customer" : "ice_vet";
     const countKey = this.isVet ? "customer" : "vet";
+    const myRole = this.isVet ? "vet" : "customer";
     let running = false;
     const poller = setInterval(async () => {
       if (running || this.destroyed || !this.peerConnection) return;
       running = true;
       try {
-        const data = await this.signalGet([remoteKey]);
+        const data = await this.signalGet([remoteKey, "bye"]);
+
+        // Remote posted a clean hang-up — surface it instead of letting the
+        // dead connection look like a failure and spin through reconnects.
+        const bye = data["bye"] as { from?: string } | undefined;
+        if (bye?.from && bye.from !== myRole) {
+          this.onRemoteBye?.();
+          return;
+        }
+
         const candidates: RTCIceCandidateInit[] =
           (data[remoteKey] as { candidates?: RTCIceCandidateInit[] })?.candidates ?? [];
         const newCount = candidates.length;
+        // Never let the processed count regress: a delayed retry of an older
+        // (shorter, prefix) candidate list can land after a newer one, and
+        // regressing would re-add already-processed candidates.
+        if (newCount <= this.processedIceCounts[countKey]) return;
         for (let i = this.processedIceCounts[countKey]; i < newCount; i++) {
           if (this.destroyed || !this.peerConnection) break;
           if (!this.peerConnection.currentRemoteDescription) {
@@ -350,6 +385,8 @@ export class StockyardVideoCall {
       } catch (err) {
         console.warn("[webrtc] createOffer/setLocalDescription failed:", err);
         this.onError?.("sdp_error", "Failed to create offer.");
+        // Don't leave the call stuck on an error status with no retry path
+        this.scheduleReconnect();
         return;
       }
       await this.signalSet("offer", { type: offer.type, sdp: offer.sdp });
@@ -374,6 +411,8 @@ export class StockyardVideoCall {
           } catch (err) {
             console.warn("[webrtc] setRemoteDescription (answer) failed:", err);
             this.onError?.("sdp_error", "Failed to process answer from remote peer.");
+            // The poller is stopped — without a reconnect nothing would retry
+            this.scheduleReconnect();
             return;
           }
           await this.drainPendingIce();
@@ -397,7 +436,10 @@ export class StockyardVideoCall {
       const data = await this.signalGet(["offer"]);
       if (this.destroyed) return;
       const offer = data["offer"] as RTCSessionDescriptionInit | undefined;
-      if (offer?.sdp) {
+      // Skip an offer we already answered (stale row from before a reconnect) —
+      // the vet, as sole offerer, will wipe and post a fresh one. Answering it
+      // again would negotiate against a peer connection that no longer exists.
+      if (offer?.sdp && offer.sdp !== this.lastAnsweredOfferSdp) {
         await this.answerOffer(offer);
       } else {
         this.onWaiting?.();
@@ -415,7 +457,8 @@ export class StockyardVideoCall {
       try {
         const data = await this.signalGet(["offer"]);
         const offer = data["offer"] as RTCSessionDescriptionInit | undefined;
-        if (offer?.sdp && this.peerConnection && !this.peerConnection.currentRemoteDescription && !this.destroyed) {
+        if (offer?.sdp && offer.sdp !== this.lastAnsweredOfferSdp &&
+            this.peerConnection && !this.peerConnection.currentRemoteDescription && !this.destroyed) {
           clearInterval(poller);
           await this.answerOffer(offer);
         }
@@ -431,13 +474,23 @@ export class StockyardVideoCall {
     if (!this.peerConnection || this.peerConnection.currentRemoteDescription || this.isNegotiating || this.destroyed) return;
     this.isNegotiating = true;
     try {
+      // Reset remote-ICE bookkeeping for this negotiation. On a re-answer
+      // after reconnect the customer may have read the previous session's
+      // (stale) candidate list — its count must not gate the fresh session's
+      // candidates, whose cumulative list can be shorter than the stale count
+      // and would otherwise be skipped forever. The row itself still holds
+      // the current list, so a count reset just means one full re-read.
+      this.processedIceCounts[this.isVet ? "customer" : "vet"] = 0;
+      this.pendingRemoteIce = [];
       try {
         await this.peerConnection.setRemoteDescription(offer);
       } catch (err) {
         console.warn("[webrtc] setRemoteDescription (offer) failed:", err);
         this.onError?.("sdp_error", "Failed to process offer from remote peer.");
+        this.scheduleReconnect();
         return;
       }
+      this.lastAnsweredOfferSdp = offer.sdp ?? null;
       await this.drainPendingIce();
       if (this.destroyed || !this.peerConnection) return;
       try {
@@ -447,6 +500,7 @@ export class StockyardVideoCall {
       } catch (err) {
         console.warn("[webrtc] createAnswer/setLocalDescription failed:", err);
         this.onError?.("sdp_error", "Failed to create answer.");
+        this.scheduleReconnect();
       }
     } finally {
       this.isNegotiating = false;
@@ -500,8 +554,16 @@ export class StockyardVideoCall {
     this.isNegotiating = false;
     if (this.iceBatchTimer) { clearTimeout(this.iceBatchTimer); this.iceBatchTimer = null; }
 
-    // Wipe only the negotiation signals — keep lobby presence intact
-    await this.signalDelete(["offer", "answer", "ice_vet", "ice_customer"]);
+    // Wipe only the negotiation signals — keep lobby presence intact.
+    // ONLY the vet (offerer) wipes: when a connection drops, both sides
+    // typically reconnect within the same second, and if the customer also
+    // wiped it would delete the vet's freshly-posted offer — leaving both
+    // sides polling for signals that will never arrive. The customer's
+    // reconnect just rebuilds its peer connection and waits for the vet's
+    // fresh offer (the stale one is skipped via lastAnsweredOfferSdp).
+    if (this.isVet) {
+      await this.signalDelete(["offer", "answer", "ice_vet", "ice_customer", "bye"]);
+    }
     if (this.destroyed) return;
 
     // Fresh peer connection using cached ICE config (avoid extra round-trip)
@@ -519,19 +581,32 @@ export class StockyardVideoCall {
     return !!(navigator.mediaDevices && (navigator.mediaDevices as any).getUserMedia);
   }
 
-  async startCall(): Promise<boolean> {
+  async startCall(existingStream?: MediaStream | null): Promise<boolean> {
     if (!StockyardVideoCall.isSupported()) {
       this.onError?.("not_supported", "Your browser does not support video calls. Please use Chrome, Firefox, Safari, or Edge.");
       return false;
     }
     try {
-      const [, iceConfig] = await Promise.all([
-        this.getMediaStream(),
-        this.fetchIceConfig(),
-      ]);
+      // Reuse the lobby preview stream when it's still live instead of opening
+      // a second capture — a second concurrent getUserMedia can fail outright
+      // on iOS Safari ("camera in use" caused by our own lobby stream) and
+      // wastes the camera pipeline on other devices.
+      const reusable = existingStream &&
+        existingStream.getVideoTracks().some((t) => t.readyState === "live") &&
+        existingStream.getAudioTracks().some((t) => t.readyState === "live");
+      if (reusable) {
+        this.localStream = existingStream;
+        this.onLocalStream?.(existingStream);
+        this.iceConfig = await this.fetchIceConfig();
+      } else {
+        const [, iceConfig] = await Promise.all([
+          this.getMediaStream(),
+          this.fetchIceConfig(),
+        ]);
+        this.iceConfig = iceConfig; // cache for reconnections
+      }
       if (this.destroyed) return false;
-      this.iceConfig = iceConfig; // cache for reconnections
-      this.createPeerConnection(iceConfig);
+      this.createPeerConnection(this.iceConfig);
       await this.joinRoom();
       this.startIcePoller();
       return true;
@@ -603,7 +678,19 @@ export class StockyardVideoCall {
     }
   }
 
-  async endCall(): Promise<void> {
+  // Best-effort "I'm leaving" signal for tab close/navigation, where normal
+  // fetch is unreliable. sendBeacon survives page teardown.
+  sendByeBeacon(): void {
+    try {
+      const body = new Blob(
+        [JSON.stringify({ key: "bye", data: { from: this.isVet ? "vet" : "customer", ts: Date.now() } })],
+        { type: "application/json" }
+      );
+      navigator.sendBeacon(this.signalUrl(), body);
+    } catch { /* best-effort */ }
+  }
+
+  async endCall(remoteEnded = false): Promise<void> {
     this.destroyed = true;
     this.stopLobbyHeartbeat();
     this.pollers.forEach(clearInterval);
@@ -612,6 +699,7 @@ export class StockyardVideoCall {
     this.pollerTimeouts = [];
     if (this.iceBatchTimer) { clearTimeout(this.iceBatchTimer); this.iceBatchTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
+    if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
     this.pendingRemoteIce = [];
     this.localIceCandidates = [];
     this.processedIceCounts = { vet: 0, customer: 0 };
@@ -626,6 +714,26 @@ export class StockyardVideoCall {
       this.peerConnection.close();
       this.peerConnection = null;
     }
-    await this.signalDelete();
+    // Tell the other side we left cleanly — without this, our departure looks
+    // like a connection failure and they churn through reconnect attempts
+    // until the 5-minute timeout. Skip when we're exiting BECAUSE they left.
+    if (!remoteEnded) {
+      try {
+        await fetch(this.signalUrl(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: "bye", data: { from: this.isVet ? "vet" : "customer", ts: Date.now() } }),
+        });
+      } catch { /* best-effort */ }
+    }
+    // Delete only OUR OWN signal rows. Deleting everything (old behavior)
+    // raced the other side's still-running heartbeat/reconnect and would
+    // also delete the bye we just posted. Remaining rows are cleared by the
+    // vet's pre-session wipe and the daily cron sweep.
+    await this.signalDelete(
+      this.isVet
+        ? ["offer", "ice_vet", "lobby_vet", "ready_vet"]
+        : ["answer", "ice_customer", "lobby_customer", "ready_customer"]
+    );
   }
 }

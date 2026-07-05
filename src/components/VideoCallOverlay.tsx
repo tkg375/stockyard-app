@@ -55,16 +55,25 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
     return () => window.removeEventListener("beforeunload", handler);
   }, []);
 
-  const close = useCallback(async () => {
-    log("ended");
+  const close = useCallback(async (remoteEnded = false) => {
+    log("ended", { remoteEnded });
     if (callRef.current) {
-      await callRef.current.endCall();
+      await callRef.current.endCall(remoteEnded);
       callRef.current = null;
     }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     onClose();
   }, [onClose, log]);
+
+  // If the tab is killed/navigated away without a clean hang-up, fire a
+  // best-effort "bye" beacon so the other side sees a clean exit instead of
+  // spinning through reconnect attempts until the timeout.
+  useEffect(() => {
+    const onPageHide = () => callRef.current?.sendByeBeacon();
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -135,6 +144,13 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         log("waiting_for_peer");
       };
 
+      call.onRemoteBye = () => {
+        if (!mounted) return;
+        log("remote_bye");
+        alert(isVet ? "The client has left the call." : "Dr. McMillen has ended the call.");
+        close(true);
+      };
+
       call.onError = (code, message) => {
         log("error", { code, message });
         if (!mounted) return;
@@ -154,8 +170,8 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         }
       };
 
-      const ok = await call.startCall();
-      log("start_call_result", { ok });
+      const ok = await call.startCall(lobbyStream);
+      log("start_call_result", { ok, reusedLobbyStream: !!lobbyStream });
 
       if (ok && mounted) {
         // Both sides keep heartbeating their own lobby presence so the other
