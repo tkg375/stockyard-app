@@ -198,10 +198,16 @@ export async function POST(req: NextRequest) {
     // bookings race for the last use, only one increments successfully. The
     // loser already has a valid paid booking at this point regardless, so we
     // don't roll anything back; this just prevents the counter overshooting.
-    await db.prepare(`
-      UPDATE promo_codes SET uses_count = uses_count + 1
-      WHERE code = ? AND (max_uses IS NULL OR uses_count < max_uses)
-    `).bind(validatedPromoCode).run();
+    // The booking is already committed (and possibly charged) — a bookkeeping
+    // failure here must not surface as an error to the customer.
+    try {
+      await db.prepare(`
+        UPDATE promo_codes SET uses_count = uses_count + 1
+        WHERE code = ? AND (max_uses IS NULL OR uses_count < max_uses)
+      `).bind(validatedPromoCode).run();
+    } catch (err) {
+      console.error(`Promo uses_count increment failed for ${validatedPromoCode} on consultation ${id}:`, err);
+    }
   }
 
   // Fetch vet info and send notifications
