@@ -43,6 +43,8 @@ export class StockyardVideoCall {
   onReconnecting: ((attempt: number, max: number) => void) | null = null;
   // Remote side ended the call cleanly (posted a "bye" signal)
   onRemoteBye: (() => void) | null = null;
+  // Remote side's tab closed/reloaded (beacon bye) — they may rejoin shortly
+  onRemoteInterrupted: (() => void) | null = null;
 
   private pollers: ReturnType<typeof setInterval>[] = [];
   private processedIceCounts = { vet: 0, customer: 0 };
@@ -62,6 +64,8 @@ export class StockyardVideoCall {
   // reconnect immediately without being blocked by (or clobbering) a real
   // scheduled reconnect.
   private graceTimer: ReturnType<typeof setTimeout> | null = null;
+  // Pending "peer's tab closed — wait for them to rejoin" window (beacon bye)
+  private beaconByeTimer: ReturnType<typeof setTimeout> | null = null;
   // SDP of the last offer we answered — lets the customer skip re-answering a
   // stale offer after a reconnect and wait for the vet's fresh one instead.
   private lastAnsweredOfferSdp: string | null = null;
@@ -131,7 +135,7 @@ export class StockyardVideoCall {
       // signalUrl() already handles guest_token param; pass keys as the comma-separated
       // "keys" query param so partial deletes work without double-encoding the URL.
       const url = keys?.length ? this.signalUrl(keys.join(",")) : this.signalUrl();
-      await fetch(url, { method: "DELETE" });
+      await fetch(url, { method: "DELETE", signal: AbortSignal.timeout(4000) });
     } catch { /* best-effort */ }
   }
 
@@ -243,6 +247,7 @@ export class StockyardVideoCall {
         this.reconnectAttempts = 0;
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
         if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
+        if (this.beaconByeTimer) { clearTimeout(this.beaconByeTimer); this.beaconByeTimer = null; }
       } else if (state === "disconnected") {
         // Short grace period — Chrome briefly goes "disconnected" on packet loss.
         // The timer also fires if the state has since moved to "failed": Chrome's
@@ -301,12 +306,38 @@ export class StockyardVideoCall {
       try {
         const data = await this.signalGet([remoteKey, "bye"]);
 
-        // Remote posted a clean hang-up — surface it instead of letting the
-        // dead connection look like a failure and spin through reconnects.
-        const bye = data["bye"] as { from?: string } | undefined;
-        if (bye?.from && bye.from !== myRole) {
-          this.onRemoteBye?.();
-          return;
+        const bye = data["bye"] as { from?: string; ts?: number; beacon?: boolean; cleared?: boolean } | undefined;
+        // Row gone (vet wipe) or overwritten with a "cleared" marker (rejoining
+        // customer) — cancel any pending "peer left" countdown.
+        if ((!bye || bye.cleared) && this.beaconByeTimer) {
+          clearTimeout(this.beaconByeTimer);
+          this.beaconByeTimer = null;
+        }
+        if (bye?.from && bye.from !== myRole && !bye.cleared) {
+          // Ignore byes that are clearly stale debris from a previous session
+          // (e.g. the vet's pre-session wipe failed) — a live bye is consumed
+          // within one 1.5s poll tick. Threshold is generous for clock skew.
+          const fresh = typeof bye.ts !== "number" || Date.now() - bye.ts < 2 * 60 * 1000;
+          if (fresh) {
+            if (!bye.beacon) {
+              // Deliberate hang-up — end immediately.
+              this.onRemoteBye?.();
+              return;
+            }
+            // Beacon bye: their tab closed OR merely reloaded. Give them a
+            // window to rejoin (the reconnect machinery keeps running); only
+            // declare them gone if nothing recovers within it.
+            if (!this.beaconByeTimer) {
+              this.onRemoteInterrupted?.();
+              this.beaconByeTimer = setTimeout(() => {
+                this.beaconByeTimer = null;
+                if (!this.destroyed && this.peerConnection?.connectionState !== "connected") {
+                  this.onRemoteBye?.();
+                }
+              }, 60000);
+            }
+            return;
+          }
         }
 
         const candidates: RTCIceCandidateInit[] =
@@ -406,6 +437,13 @@ export class StockyardVideoCall {
         const answer = data["answer"] as RTCSessionDescriptionInit | undefined;
         if (answer?.sdp && this.peerConnection && !this.peerConnection.currentRemoteDescription && !this.destroyed) {
           clearInterval(poller);
+          // Fresh answer accepted — reset remote-ICE bookkeeping (mirror of the
+          // reset in answerOffer). Between our reconnect wipe and this answer,
+          // the customer's dying old connection can repost its long stale
+          // candidate list; without a reset its count would gate the fresh
+          // session's shorter cumulative list forever.
+          this.processedIceCounts[this.isVet ? "customer" : "vet"] = 0;
+          this.pendingRemoteIce = [];
           try {
             await this.peerConnection.setRemoteDescription(answer);
           } catch (err) {
@@ -561,8 +599,12 @@ export class StockyardVideoCall {
     // sides polling for signals that will never arrive. The customer's
     // reconnect just rebuilds its peer connection and waits for the vet's
     // fresh offer (the stale one is skipped via lastAnsweredOfferSdp).
+    // Note: "bye" is deliberately NOT wiped here — a beacon bye must survive
+    // the reconnect cycle so its 60s "peer left" countdown can still fire if
+    // the peer never returns. It's cleared by the rejoining customer, the
+    // vet's pre-session wipe, or the ts-freshness check.
     if (this.isVet) {
-      await this.signalDelete(["offer", "answer", "ice_vet", "ice_customer", "bye"]);
+      await this.signalDelete(["offer", "answer", "ice_vet", "ice_customer"]);
     }
     if (this.destroyed) return;
 
@@ -606,6 +648,14 @@ export class StockyardVideoCall {
         this.iceConfig = iceConfig; // cache for reconnections
       }
       if (this.destroyed) return false;
+      // Customer entering (or re-entering after a reload): neutralize any bye
+      // row lingering from a beacon/previous session so it can't kill this
+      // call, and so the vet's pending "peer left" countdown gets cancelled.
+      // (The vet's pre-session wipe deletes the row outright; this covers the
+      // rejoin path and the case where that wipe request failed.)
+      if (!this.isVet) {
+        this.signalSet("bye", { cleared: true, ts: Date.now() });
+      }
       this.createPeerConnection(this.iceConfig);
       await this.joinRoom();
       this.startIcePoller();
@@ -682,8 +732,10 @@ export class StockyardVideoCall {
   // fetch is unreliable. sendBeacon survives page teardown.
   sendByeBeacon(): void {
     try {
+      // beacon: true tells the receiver this may be a mere reload/navigation,
+      // not a deliberate hang-up — they wait for a rejoin instead of ending.
       const body = new Blob(
-        [JSON.stringify({ key: "bye", data: { from: this.isVet ? "vet" : "customer", ts: Date.now() } })],
+        [JSON.stringify({ key: "bye", data: { from: this.isVet ? "vet" : "customer", ts: Date.now(), beacon: true } })],
         { type: "application/json" }
       );
       navigator.sendBeacon(this.signalUrl(), body);
@@ -700,6 +752,7 @@ export class StockyardVideoCall {
     if (this.iceBatchTimer) { clearTimeout(this.iceBatchTimer); this.iceBatchTimer = null; }
     if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
     if (this.graceTimer) { clearTimeout(this.graceTimer); this.graceTimer = null; }
+    if (this.beaconByeTimer) { clearTimeout(this.beaconByeTimer); this.beaconByeTimer = null; }
     this.pendingRemoteIce = [];
     this.localIceCandidates = [];
     this.processedIceCounts = { vet: 0, customer: 0 };
@@ -719,10 +772,13 @@ export class StockyardVideoCall {
     // until the 5-minute timeout. Skip when we're exiting BECAUSE they left.
     if (!remoteEnded) {
       try {
+        // Bounded: on a dead uplink these must not freeze the "End Call"
+        // button behind a 30s+ browser fetch timeout.
         await fetch(this.signalUrl(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ key: "bye", data: { from: this.isVet ? "vet" : "customer", ts: Date.now() } }),
+          signal: AbortSignal.timeout(4000),
         });
       } catch { /* best-effort */ }
     }

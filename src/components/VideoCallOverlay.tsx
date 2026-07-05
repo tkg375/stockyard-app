@@ -151,6 +151,14 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         close(true);
       };
 
+      call.onRemoteInterrupted = () => {
+        if (!mounted) return;
+        log("remote_interrupted");
+        setStatus(isVet
+          ? "Your client's connection was interrupted — waiting for them to return…"
+          : "Dr. McMillen's connection was interrupted — waiting for them to return…");
+      };
+
       call.onError = (code, message) => {
         log("error", { code, message });
         if (!mounted) return;
@@ -189,7 +197,11 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
       mounted = false;
       clearTimeout(connectTimer);
       if (callRef.current) {
-        callRef.current.endCall().catch(() => {});
+        // remoteEnded=true: don't post a deliberate bye from effect cleanup.
+        // Real user hang-ups go through close(); tab close/navigation is
+        // covered by the pagehide beacon. Posting one here would let React
+        // strict-mode's dev double-effect kill the peer's call spuriously.
+        callRef.current.endCall(true).catch(() => {});
         callRef.current = null;
       }
       if (localVideoRef.current) localVideoRef.current.srcObject = null;
