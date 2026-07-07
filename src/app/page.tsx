@@ -1,17 +1,37 @@
 "use client";
+import { useEffect, useRef } from "react";
 import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import Link from "next/link";
 
 export default function HomePage() {
+  const mainRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const els = mainRef.current?.querySelectorAll<HTMLElement>(".reveal") ?? [];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.15 }
+    );
+    els.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div className="marketing-page">
       <SiteNav />
-      <main>
+      <main ref={mainRef}>
         {/* Hero */}
         <header className="hero">
           {/* Centered hero content */}
-          <div className="container" style={{ flex: 1, display: "flex", alignItems: "flex-start" }}>
+          <div className="container" style={{ flex: 1, display: "flex", alignItems: "center" }}>
             <div className="hero-content">
               <h1>Expert Veterinary Care From the Comfort of Home</h1>
               <p className="hero-tagline">
@@ -37,6 +57,14 @@ export default function HomePage() {
             </div>
           </div>
 
+          {/* Scroll cue */}
+          <div className="hero-scroll-cue">
+            <span>Scroll to explore</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" style={{ color: "#ffffff" }}>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+
           {/* Stats bar at bottom of hero */}
           <div className="hero-stats">
             <div className="hero-stats-inner">
@@ -58,7 +86,7 @@ export default function HomePage() {
         </header>
 
         {/* Quick Links */}
-        <section style={{ padding: "64px 0" }}>
+        <section className="reveal" style={{ padding: "64px 0" }}>
           <div className="container">
             <h2 className="section-title">Florida&apos;s Trusted Rural Vet — Online</h2>
             <p className="section-subtitle">
@@ -95,7 +123,7 @@ export default function HomePage() {
         </section>
 
         {/* How It Works Preview */}
-        <section id="how-it-works" style={{ padding: "72px 0" }}>
+        <section id="how-it-works" className="reveal" style={{ padding: "72px 0" }}>
           <div className="container">
             <h2 className="section-title">How It Works</h2>
             <p className="section-subtitle">Getting expert vet care for your animals has never been easier.</p>
@@ -134,7 +162,7 @@ export default function HomePage() {
         </section>
 
         {/* Animal Types */}
-        <section id="animals" style={{ padding: "72px 0" }}>
+        <section id="animals" className="reveal" style={{ padding: "72px 0" }}>
           <div className="container">
             <h2 className="section-title">Animals We Serve</h2>
             <p className="section-subtitle">Expert care for all your farm and companion animals.</p>
@@ -173,7 +201,7 @@ export default function HomePage() {
         </section>
 
         {/* Pricing */}
-        <section id="pricing" style={{ padding: "72px 0" }}>
+        <section id="pricing" className="reveal" style={{ padding: "72px 0" }}>
           <div className="container">
             <h2 className="section-title">Simple, Transparent Pricing</h2>
             <p className="section-subtitle">One flat rate. No farm call fees, no emergency surcharges, no surprise bills.</p>
@@ -226,7 +254,7 @@ export default function HomePage() {
         </section>
 
         {/* Dr. McMillen Bio Card */}
-        <section style={{ padding: "72px 0" }}>
+        <section className="reveal" style={{ padding: "72px 0" }}>
           <div className="container">
             <div className="mcmillen-bio-grid" style={{
               background: "rgba(255,255,255,0.55)",
@@ -261,7 +289,7 @@ export default function HomePage() {
         </section>
 
         {/* CTA Banner */}
-        <section style={{ padding: "80px 0", textAlign: "center", position: "relative", background: "linear-gradient(135deg, #1a6a6a 0%, #5BC4C4 55%, #E8427A 100%)" }}>
+        <section className="reveal" style={{ padding: "80px 0", textAlign: "center", position: "relative", background: "linear-gradient(135deg, #1a6a6a 0%, #5BC4C4 55%, #E8427A 100%)" }}>
           <div style={{ position: "absolute", inset: 0 }} />
           <div className="container" style={{ position: "relative", zIndex: 1 }}>
             <h2 style={{ fontFamily: "var(--font-display)", fontWeight: 800, color: "#f5f0e8", fontSize: "2rem", marginBottom: "16px" }}>
