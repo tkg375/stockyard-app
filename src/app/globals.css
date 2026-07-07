@@ -328,8 +328,11 @@ img { max-width: 100%; height: auto; }
 
 @media (max-width: 768px) {
   .hero {
-    background-size: cover, contain;
-    background-position: center, center top;
+    background-image:
+      linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.35)),
+      url('/hero-animals-mobile.jpg');
+    background-size: cover, cover;
+    background-position: center, center;
   }
 }
 
