@@ -308,12 +308,6 @@ img { max-width: 100%; height: auto; }
 .btn-success:hover { background: #218838; }
 .btn-full { width: 100%; display: block; }
 
-@keyframes hero-gradient {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
 /* Hero */
 .hero {
   position: relative;
@@ -321,9 +315,12 @@ img { max-width: 100%; height: auto; }
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: linear-gradient(135deg, #2a8a8a 0%, #5BC4C4 25%, #E8427A 55%, #5BC4C4 75%, #E8427A 100%);
-  background-size: 300% 300%;
-  animation: hero-gradient 12s ease infinite;
+  background-image:
+    linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.35)),
+    url('/hero-animals.jpg');
+  background-size: cover, cover;
+  background-position: center, center 30%;
+  background-repeat: no-repeat, no-repeat;
   min-height: calc(100vh - var(--nav-h));
   min-height: calc(100svh - var(--nav-h));
 }
