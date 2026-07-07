@@ -64,26 +64,26 @@ export default function HomePage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
             </svg>
           </div>
-
-          {/* Stats bar at bottom of hero */}
-          <div className="hero-stats">
-            <div className="hero-stats-inner">
-              {[
-                { icon: "💵", value: "$60 Flat Rate", label: "No hidden fees, no surprises" },
-                { icon: "📅", value: "7 Days a Week", label: "Available evenings & weekends" },
-                { icon: "🌴", value: "Florida-Wide", label: "Serving all of Florida" },
-              ].map((s) => (
-                <div key={s.value} style={{ minWidth: "140px" }}>
-                  <div style={{ fontSize: "2rem", marginBottom: "6px" }}>{s.icon}</div>
-                  <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "1.3rem", color: "#f5f0e8", marginBottom: "4px" }}>
-                    {s.value}
-                  </div>
-                  <div style={{ color: "#c5eaea", fontSize: "0.9rem" }}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
         </header>
+
+        {/* Stats bar below hero */}
+        <div className="hero-stats reveal">
+          <div className="hero-stats-inner">
+            {[
+              { icon: "💵", value: "$60 Flat Rate", label: "No hidden fees, no surprises" },
+              { icon: "📅", value: "7 Days a Week", label: "Available evenings & weekends" },
+              { icon: "🌴", value: "Florida-Wide", label: "Serving all of Florida" },
+            ].map((s) => (
+              <div key={s.value} style={{ minWidth: "140px" }}>
+                <div style={{ fontSize: "2rem", marginBottom: "6px" }}>{s.icon}</div>
+                <div style={{ fontFamily: "var(--font-display)", fontWeight: 800, fontSize: "1.3rem", color: "#f5f0e8", marginBottom: "4px" }}>
+                  {s.value}
+                </div>
+                <div style={{ color: "#c5eaea", fontSize: "0.9rem" }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Quick Links */}
         <section className="reveal" style={{ padding: "64px 0" }}>
