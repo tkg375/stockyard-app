@@ -315,6 +315,7 @@ img { max-width: 100%; height: auto; }
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  background-color: #1a6a6a;
   background-image:
     linear-gradient(rgba(0,0,0,0.35), rgba(0,0,0,0.35)),
     url('/hero-animals.jpg');
@@ -323,6 +324,13 @@ img { max-width: 100%; height: auto; }
   background-repeat: no-repeat, no-repeat;
   min-height: calc(100vh - var(--nav-h));
   min-height: calc(100svh - var(--nav-h));
+}
+
+@media (max-width: 768px) {
+  .hero {
+    background-size: cover, contain;
+    background-position: center, center top;
+  }
 }
 
 .hero-scroll-cue {
