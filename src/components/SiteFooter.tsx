@@ -56,6 +56,30 @@ export default function SiteFooter() {
             </Link>
           </div>
         </div>
+        <div style={{ textAlign: "center", marginTop: "12px" }}>
+          <a
+            href="https://theweekendweb.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "0.75rem",
+              color: "rgba(255,255,255,0.5)",
+              textDecoration: "none",
+            }}
+          >
+            <span>Powered By</span>
+            <span style={{ fontFamily: "monospace" }}>
+              <span style={{ color: "rgba(255,255,255,0.5)" }}>&lt;</span>
+              <span style={{ color: "#a78bfa" }}>tww</span>
+              <span style={{ color: "#22d3ee" }}>/</span>
+              <span style={{ color: "rgba(255,255,255,0.5)" }}>&gt;</span>
+            </span>
+            <span>The Weekend Web</span>
+          </a>
+        </div>
       </div>
     </footer>
   );
