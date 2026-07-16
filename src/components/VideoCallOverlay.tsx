@@ -32,6 +32,13 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
   const [slowConnect, setSlowConnect] = useState(false);
   // null = not reconnecting; "1/4" etc = attempt display
   const [reconnectLabel, setReconnectLabel] = useState<string | null>(null);
+  // Fatal camera/mic error — shown as a persistent full-screen message instead of
+  // a native alert(), since alert() can be silently suppressed by mobile browsers
+  // on repeated triggers (seen in production: 4 retries, same denial, no visible alert).
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  // Bumping this re-runs the start effect below, so "Try Again" can re-request
+  // camera/mic access without a full remount.
+  const [retryKey, setRetryKey] = useState(0);
   const isMobile = typeof navigator !== "undefined" && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
   // Lock orientation and prevent body scroll while in call
@@ -96,6 +103,7 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
       log("overlay_start", { ua: typeof navigator !== "undefined" ? navigator.userAgent : "", mobile: isMobile });
       const call = new StockyardVideoCall(consultationId, isVet, guestToken);
       callRef.current = call;
+      let hadFatalPermissionError = false;
 
       call.onLocalStream = (stream) => {
         if (!mounted) return;
@@ -169,12 +177,13 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         } else if (code === "signaling_failed" || code === "sdp_error") {
           // Transient — show in the status bar, never alert
           setStatus(message);
+        } else if (["camera_denied", "no_camera", "not_supported", "media_error"].includes(code)) {
+          // Fatal camera/device errors — persistent screen, not a dismiss-and-lose-it alert.
+          hadFatalPermissionError = true;
+          setStatus(null);
+          setPermissionError(message);
         } else {
-          // Fatal camera/device errors
           alert(message);
-          if (["camera_denied", "no_camera", "not_supported", "media_error"].includes(code)) {
-            close();
-          }
         }
       };
 
@@ -188,7 +197,7 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
         call.startLobbyHeartbeat();
       }
 
-      if (!ok && mounted && callRef.current) close();
+      if (!ok && mounted && callRef.current && !hadFatalPermissionError) close();
     }
 
     start();
@@ -208,7 +217,7 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
       if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [consultationId, isVet]);
+  }, [consultationId, isVet, retryKey]);
 
   function toggleAudio() {
     if (!callRef.current) return;
@@ -241,9 +250,66 @@ export default function VideoCallOverlay({ consultationId, petName, isVet, guest
     }
   }
 
+  function retryPermissions() {
+    if ("vibrate" in navigator) navigator.vibrate(10);
+    log("permission_retry");
+    setPermissionError(null);
+    setStatus("Starting camera…");
+    setRetryKey((k) => k + 1);
+  }
+
   // Responsive local video size
   const localW = isMobile ? "clamp(80px, 22vw, 130px)" : "120px";
   const localH = isMobile ? "clamp(60px, 16vw, 98px)" : "90px";
+
+  if (permissionError) {
+    return (
+      <div style={{
+        position: "fixed", inset: 0, background: "#1a1a1a", zIndex: 10000,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom))",
+        color: "#fff", textAlign: "center",
+      }}>
+        <span style={{
+          width: 64, height: 64, borderRadius: "50%", background: "#dc3545",
+          display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 20, flexShrink: 0,
+        }}>
+          <CamOffIcon />
+        </span>
+        <h2 style={{ margin: "0 0 12px 0", fontSize: "1.2rem" }}>We can&apos;t start the call</h2>
+        <p style={{
+          margin: "0 0 28px 0", maxWidth: 420, lineHeight: 1.6, fontSize: "0.95rem",
+          color: "rgba(255,255,255,0.85)", whiteSpace: "pre-line",
+        }}>
+          {permissionError}
+        </p>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
+          <button
+            onClick={retryPermissions}
+            style={{
+              padding: "14px 28px", borderRadius: 10, border: "none",
+              background: "linear-gradient(135deg,#1a6a6a,#5BC4C4)", color: "#fff",
+              fontWeight: 600, fontSize: "1rem", cursor: "pointer",
+              WebkitTapHighlightColor: "transparent",
+            }}
+          >
+            Try Again
+          </button>
+          <button
+            onClick={() => close()}
+            style={{
+              padding: "14px 28px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.3)",
+              background: "transparent", color: "#fff",
+              fontWeight: 600, fontSize: "1rem", cursor: "pointer",
+              WebkitTapHighlightColor: "transparent",
+            }}
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{

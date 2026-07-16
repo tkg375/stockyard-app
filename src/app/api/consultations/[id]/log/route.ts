@@ -3,6 +3,12 @@ import { getDb } from "@/lib/db";
 import { getSessionFromRequest } from "@/lib/auth";
 import { checkOrigin } from "@/lib/csrf";
 import { logCallEvent } from "@/lib/callLog";
+import { sendCallTroubleNotification } from "@/lib/notifications";
+import { getCloudflareContext } from "@opennextjs/cloudflare";
+
+// Fatal camera/device errors — worth telling the vet about so she doesn't
+// think the call itself is broken when it's actually a client-side permission issue.
+const NOTIFIABLE_ERROR_CODES = new Set(["camera_denied", "no_camera", "camera_in_use", "not_supported", "media_error"]);
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +62,63 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     userAgent: req.headers.get("user-agent"),
   });
 
+  if (role === "customer" && body.event === "error") {
+    const detail = body.detail as { code?: unknown; message?: unknown } | undefined;
+    const code = typeof detail?.code === "string" ? detail.code : "";
+    const message = typeof detail?.message === "string" ? detail.message : "";
+    if (NOTIFIABLE_ERROR_CODES.has(code)) {
+      await notifyVetOfCallTrouble(auth.db, id, code, message);
+    }
+  }
+
   return NextResponse.json({ ok: true });
+}
+
+// Emails the vet once per (consultation, error code) the first time the customer
+// hits a fatal camera/mic error, so she knows it's a client-side permission issue
+// rather than the platform being broken. Throttled via 'trouble_notified' marker
+// rows keyed by code — repeats of the *same* issue don't re-notify, but if the
+// customer hits a *different* error (e.g. no_camera after fixing camera_denied),
+// that's still worth flagging separately.
+async function notifyVetOfCallTrouble(
+  db: Awaited<ReturnType<typeof getDb>>,
+  consultationId: string,
+  code: string,
+  message: string
+): Promise<void> {
+  const priorCodes = await db
+    .prepare("SELECT detail FROM call_logs WHERE consultation_id = ? AND role = 'server' AND event = 'trouble_notified'")
+    .bind(consultationId)
+    .all<{ detail: string | null }>();
+  const alreadyNotified = (priorCodes.results ?? []).some((r) => {
+    try { return JSON.parse(r.detail ?? "{}")?.code === code; } catch { return false; }
+  });
+  if (alreadyNotified) return;
+
+  const row = await db.prepare("SELECT pet_name, user_name FROM consultations WHERE id = ?").bind(consultationId)
+    .first<{ pet_name: string; user_name: string }>();
+  if (!row) return;
+
+  const vetEmail = await db.prepare("SELECT value FROM settings WHERE key = 'vet_email'").first<{ value: string }>();
+  if (!vetEmail?.value) return;
+
+  const { ctx } = await getCloudflareContext({ async: true });
+  ctx.waitUntil(
+    sendCallTroubleNotification({
+      toEmail: vetEmail.value,
+      consultationId,
+      petName: row.pet_name,
+      userName: row.user_name,
+      errorCode: code,
+      errorMessage: message,
+    })
+      .then((ok) =>
+        ok
+          ? logCallEvent(db, { consultationId, role: "server", event: "trouble_notified", detail: { code } })
+          : logCallEvent(db, { consultationId, role: "server", event: "trouble_notify_failed", detail: { code } })
+      )
+      .catch((err) => logCallEvent(db, { consultationId, role: "server", event: "trouble_notify_failed", detail: { code, error: String(err) } }))
+  );
 }
 
 // GET /api/consultations/[id]/log   — vet-only: view recent diagnostic events for a call

@@ -530,3 +530,41 @@ export async function sendMessageNotification(opts: {
     textBody: `${heading}\n\n"${preview}"\n\nView and reply at: ${dashUrl}`,
   });
 }
+
+// ─── Call trouble (customer-side camera/mic failure) ─────────────────────────
+
+const CALL_ERROR_LABELS: Record<string, string> = {
+  camera_denied: "Blocked camera/microphone permission",
+  no_camera: "No camera or microphone found",
+  camera_in_use: "Camera in use by another app",
+  not_supported: "Browser doesn't support video calls",
+  media_error: "Camera/microphone error",
+};
+
+export async function sendCallTroubleNotification(opts: {
+  toEmail: string;
+  consultationId: string;
+  petName: string;
+  userName: string;
+  errorCode: string;
+  errorMessage: string;
+}): Promise<boolean> {
+  const label = CALL_ERROR_LABELS[opts.errorCode] ?? "Camera/microphone error";
+  const dashUrl = `${VET_MANAGE_URL}/consultation/${opts.consultationId}`;
+
+  return sendEmail({
+    to: opts.toEmail,
+    subject: subj(`Client Can't Join — ${opts.petName} (${label})`),
+    htmlBody: wrapInEmailTemplate(`
+      <h2 style="color:#c0392b;margin:0 0 16px 0;">The call isn't broken — the client is stuck on a permissions error</h2>
+      <p>${h(opts.userName)} tried to join ${h(opts.petName)}'s video call but hit a device error on their end. They've been shown instructions to fix it and a "Try Again" button, so no action is required unless it keeps happening.</p>
+      <div style="background:#fff3cd;border-left:4px solid #ffc107;padding:15px 20px;margin:20px 0;">
+        <p style="margin:0 0 6px 0;color:#856404;"><strong>${h(label)}</strong></p>
+        <p style="margin:0;color:#856404;white-space:pre-line;font-size:0.9rem;">${h(opts.errorMessage)}</p>
+      </div>
+      <div style="text-align:center;margin:30px 0;">
+        <a href="${dashUrl}" style="background-color:#2c5530;color:white;padding:14px 32px;text-decoration:none;border-radius:8px;font-weight:bold;display:inline-block;">View Consultation</a>
+      </div>`),
+    textBody: `${opts.userName} tried to join ${opts.petName}'s video call but hit a device error: ${label}\n\n${opts.errorMessage}\n\nThey've been shown instructions and a Try Again button — no action needed unless it keeps happening.\n\nView: ${dashUrl}`,
+  });
+}
