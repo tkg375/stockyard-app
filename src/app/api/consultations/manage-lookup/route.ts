@@ -47,7 +47,8 @@ export async function GET(req: NextRequest) {
   }>();
 
   const recordRows = await db.prepare(`
-    SELECT id, pet_name, pet_type, concern, date, time, status, notes, ai_summary, ai_summary_approved, discharge_sent_at
+    SELECT id, pet_name, pet_type, concern, date, time, status, notes, ai_summary, ai_summary_approved, discharge_sent_at,
+      pet_breed, pet_weight, pet_dob, pet_sex, pet_spayed_neutered, pet_color
     FROM consultations
     WHERE ${column} = ? AND status = 'completed'
     ORDER BY date DESC, time DESC
@@ -64,6 +65,12 @@ export async function GET(req: NextRequest) {
     ai_summary: string | null;
     ai_summary_approved: number | null;
     discharge_sent_at: number | null;
+    pet_breed: string | null;
+    pet_weight: number | null;
+    pet_dob: string | null;
+    pet_sex: string | null;
+    pet_spayed_neutered: number | null;
+    pet_color: string | null;
   }>();
 
   return NextResponse.json({ consultations: rows.results, records: recordRows.results });

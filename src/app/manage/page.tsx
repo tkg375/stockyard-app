@@ -32,6 +32,12 @@ interface ConsultationRecord {
   ai_summary: string | null;
   ai_summary_approved: number | null;
   discharge_sent_at: number | null;
+  pet_breed: string | null;
+  pet_weight: number | null;
+  pet_dob: string | null;
+  pet_sex: string | null;
+  pet_spayed_neutered: number | null;
+  pet_color: string | null;
 }
 
 interface SoapNotes { subjective: string; objective: string; assessment: string; plan: string; }
@@ -357,10 +363,16 @@ export default function ManageConsultationPage() {
                   <tbody>
                     {[
                       ["Pet", `${selectedRecord.pet_name} (${selectedRecord.pet_type})`],
+                      ["Breed", selectedRecord.pet_breed],
+                      ["Weight", selectedRecord.pet_weight ? `${selectedRecord.pet_weight} lbs` : null],
+                      ["Date of Birth", selectedRecord.pet_dob ? formatDate(selectedRecord.pet_dob) : null],
+                      ["Sex", selectedRecord.pet_sex],
+                      ["Spayed/Neutered", selectedRecord.pet_spayed_neutered == null ? null : (selectedRecord.pet_spayed_neutered ? "Yes" : "No")],
+                      ["Color", selectedRecord.pet_color],
                       ["Concern", selectedRecord.concern],
                       ["Date", formatDate(selectedRecord.date)],
                       ["Time", formatTime(selectedRecord.time)],
-                    ].map(([label, value]) => (
+                    ].filter(([, value]) => value != null && value !== "").map(([label, value]) => (
                       <tr key={label}>
                         <td style={{ padding: "4px 0", fontWeight: 600, fontSize: "0.875rem", color: "#374151", width: "30%" }}>{label}</td>
                         <td style={{ padding: "4px 0", fontSize: "0.875rem", color: "#4b5563" }}>{value}</td>
