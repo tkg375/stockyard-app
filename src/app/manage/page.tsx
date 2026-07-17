@@ -34,6 +34,17 @@ interface ConsultationRecord {
   discharge_sent_at: number | null;
 }
 
+interface SoapNotes { subjective: string; objective: string; assessment: string; plan: string; }
+
+function parseSoap(notes: string | null): SoapNotes | null {
+  if (!notes) return null;
+  try {
+    const p = JSON.parse(notes);
+    if (p && typeof p === "object" && "subjective" in p) return p as SoapNotes;
+  } catch {}
+  return { subjective: "", objective: "", assessment: "", plan: notes };
+}
+
 function formatDate(dateStr: string) {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -373,7 +384,28 @@ export default function ManageConsultationPage() {
               {selectedRecord.notes ? (
                 <div>
                   <h4 style={{ fontWeight: 600, fontSize: "0.9rem", color: "#111827", marginBottom: 6 }}>Visit Notes</h4>
-                  <p style={{ fontSize: "0.875rem", color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{selectedRecord.notes}</p>
+                  {(() => {
+                    const soap = parseSoap(selectedRecord.notes);
+                    if (!soap) return null;
+                    const labels: [keyof SoapNotes, string][] = [
+                      ["subjective", "Subjective"],
+                      ["objective", "Objective"],
+                      ["assessment", "Assessment"],
+                      ["plan", "Plan"],
+                    ];
+                    const anyFilled = labels.some(([k]) => soap[k]?.trim());
+                    if (!anyFilled) return null;
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {labels.map(([k, label]) => soap[k]?.trim() ? (
+                          <div key={k}>
+                            <div style={{ fontWeight: 600, fontSize: "0.8rem", color: "#1a6a6a", marginBottom: 2 }}>{label}</div>
+                            <p style={{ fontSize: "0.875rem", color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.6, margin: 0 }}>{soap[k]}</p>
+                          </div>
+                        ) : null)}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : null}
             </div>
