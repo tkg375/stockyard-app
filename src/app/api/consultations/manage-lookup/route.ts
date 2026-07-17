@@ -46,5 +46,25 @@ export async function GET(req: NextRequest) {
     user_name: string;
   }>();
 
-  return NextResponse.json({ consultations: rows.results });
+  const recordRows = await db.prepare(`
+    SELECT id, pet_name, pet_type, concern, date, time, status, notes, ai_summary, ai_summary_approved, discharge_sent_at
+    FROM consultations
+    WHERE ${column} = ? AND status = 'completed'
+    ORDER BY date DESC, time DESC
+    LIMIT 50
+  `).bind(normalizedValue).all<{
+    id: string;
+    pet_name: string;
+    pet_type: string;
+    concern: string;
+    date: string;
+    time: string;
+    status: string;
+    notes: string | null;
+    ai_summary: string | null;
+    ai_summary_approved: number | null;
+    discharge_sent_at: number | null;
+  }>();
+
+  return NextResponse.json({ consultations: rows.results, records: recordRows.results });
 }

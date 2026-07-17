@@ -73,7 +73,7 @@ export default function SiteNav() {
             </>
           ) : (
             <>
-              <Link href="/manage" className="nav-login">My Appointment</Link>
+              <Link href="/manage" className="nav-login">My Stockyard</Link>
               <Link href="/book" className="nav-cta">Book Now</Link>
             </>
           )}
@@ -115,7 +115,7 @@ export default function SiteNav() {
           </>
         ) : (
           <>
-            <Link href="/manage" onClick={() => setDrawerOpen(false)}>My Appointment</Link>
+            <Link href="/manage" onClick={() => setDrawerOpen(false)}>My Stockyard</Link>
             <Link href="/book" onClick={() => setDrawerOpen(false)}>
               Book a Consultation
             </Link>

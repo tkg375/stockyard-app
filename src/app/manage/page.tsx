@@ -20,6 +20,20 @@ interface Consultation {
   is_guest: number | null;
 }
 
+interface ConsultationRecord {
+  id: string;
+  pet_name: string;
+  pet_type: string;
+  concern: string;
+  date: string;
+  time: string;
+  status: string;
+  notes: string | null;
+  ai_summary: string | null;
+  ai_summary_approved: number | null;
+  discharge_sent_at: number | null;
+}
+
 function formatDate(dateStr: string) {
   return new Date(dateStr + "T00:00:00").toLocaleDateString("en-US", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
@@ -47,6 +61,8 @@ export default function ManageConsultationPage() {
   const [cancelSuccess, setCancelSuccess] = useState(false);
   const [cancelRefunded, setCancelRefunded] = useState(false);
   const [troubleOpen, setTroubleOpen] = useState(false);
+  const [records, setRecords] = useState<ConsultationRecord[]>([]);
+  const [selectedRecord, setSelectedRecord] = useState<ConsultationRecord | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,14 +72,19 @@ export default function ManageConsultationPage() {
     setSearched(true);
     setConsultations([]);
     setSelected(null);
+    setRecords([]);
+    setSelectedRecord(null);
 
     try {
       const res = await fetch(
         `/api/consultations/manage-lookup?type=${searchType}&value=${encodeURIComponent(searchValue.trim())}`
       );
-      const data = await res.json() as { consultations?: Consultation[]; error?: string };
+      const data = await res.json() as { consultations?: Consultation[]; records?: ConsultationRecord[]; error?: string };
       if (!res.ok) setError(data.error ?? "Search failed.");
-      else setConsultations(data.consultations ?? []);
+      else {
+        setConsultations(data.consultations ?? []);
+        setRecords(data.records ?? []);
+      }
     } catch {
       setError("Network error. Please try again.");
     }
@@ -265,7 +286,100 @@ export default function ManageConsultationPage() {
             </div>
           )}
 
-          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid #f3f4f6", textAlign: "center" }}>
+          {searched && !loading && records.length > 0 && (
+            <div style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid #e5e7eb" }} className="no-print">
+              <h3 style={{ fontWeight: 600, marginBottom: 12, color: "#111827" }}>Past Visit Records</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {records.map((r) => (
+                  <div
+                    key={r.id}
+                    onClick={() => setSelectedRecord(selectedRecord?.id === r.id ? null : r)}
+                    style={{
+                      padding: "14px 16px",
+                      borderRadius: 12,
+                      border: `2px solid ${selectedRecord?.id === r.id ? "#1a6a6a" : "#e5e7eb"}`,
+                      background: selectedRecord?.id === r.id ? "#f0fafa" : "#fff",
+                      cursor: "pointer",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div style={{ width: 44, height: 44, background: "#e0f2f1", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
+                        {r.pet_type === "Dog" ? "🐕" : r.pet_type === "Cat" ? "🐈" : r.pet_type === "Horse" ? "🐴" : "🐾"}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: "#111827" }}>{r.pet_name} ({r.pet_type})</div>
+                        <div style={{ fontSize: "0.85rem", color: "#6b7280" }}>{r.concern}</div>
+                        <div style={{ fontSize: "0.85rem", color: "#1a6a6a", fontWeight: 500 }}>
+                          {formatDate(r.date)} at {formatTime(r.time)}
+                        </div>
+                      </div>
+                      {r.ai_summary_approved ? (
+                        <span style={{ padding: "3px 10px", borderRadius: 99, fontSize: "0.75rem", fontWeight: 600, background: "#dcfce7", color: "#15803d" }}>
+                          Summary Ready
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {selectedRecord && (
+            <div id="record-detail" style={{ marginTop: 24, paddingTop: 24, borderTop: "1px solid #e5e7eb" }}>
+              <div className="no-print" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <h3 style={{ fontWeight: 600, color: "#111827", margin: 0 }}>Visit Details — {selectedRecord.pet_name}</h3>
+                <button
+                  onClick={() => window.print()}
+                  className="btn"
+                  style={{ background: "#1a6a6a", color: "#fff", padding: "8px 16px", fontSize: "0.85rem" }}
+                >
+                  Print / Download
+                </button>
+              </div>
+              <div className="print-header" style={{ display: "none" }}>
+                <h2>Stockyard Veterinary — Visit Record</h2>
+              </div>
+              <div style={{ background: "#f9fafb", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <tbody>
+                    {[
+                      ["Pet", `${selectedRecord.pet_name} (${selectedRecord.pet_type})`],
+                      ["Concern", selectedRecord.concern],
+                      ["Date", formatDate(selectedRecord.date)],
+                      ["Time", formatTime(selectedRecord.time)],
+                    ].map(([label, value]) => (
+                      <tr key={label}>
+                        <td style={{ padding: "4px 0", fontWeight: 600, fontSize: "0.875rem", color: "#374151", width: "30%" }}>{label}</td>
+                        <td style={{ padding: "4px 0", fontSize: "0.875rem", color: "#4b5563" }}>{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {selectedRecord.ai_summary_approved && selectedRecord.ai_summary ? (
+                <div style={{ marginBottom: 16 }}>
+                  <h4 style={{ fontWeight: 600, fontSize: "0.9rem", color: "#111827", marginBottom: 6 }}>Discharge Summary</h4>
+                  <p style={{ fontSize: "0.875rem", color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{selectedRecord.ai_summary}</p>
+                </div>
+              ) : (
+                <p style={{ fontSize: "0.875rem", color: "#9ca3af", marginBottom: 16 }}>
+                  A discharge summary has not been finalized for this visit yet.
+                </p>
+              )}
+
+              {selectedRecord.notes ? (
+                <div>
+                  <h4 style={{ fontWeight: 600, fontSize: "0.9rem", color: "#111827", marginBottom: 6 }}>Visit Notes</h4>
+                  <p style={{ fontSize: "0.875rem", color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{selectedRecord.notes}</p>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          <div style={{ marginTop: 28, paddingTop: 20, borderTop: "1px solid #f3f4f6", textAlign: "center" }} className="no-print">
             <button onClick={() => setTroubleOpen(true)} style={{ background: "none", border: "none", color: "#1a6a6a", fontSize: "0.85rem", cursor: "pointer", fontWeight: 600, padding: 0, textDecoration: "underline", textDecorationStyle: "dotted", textUnderlineOffset: 3 }}>
               Having Trouble?
             </button>
@@ -273,6 +387,29 @@ export default function ManageConsultationPage() {
         </div>
       </div>
       {troubleOpen && <TroubleModal onClose={() => setTroubleOpen(false)} />}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          #record-detail, #record-detail * {
+            visibility: visible;
+          }
+          #record-detail {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+          }
+          #record-detail .print-header {
+            display: block !important;
+            margin-bottom: 16px;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
