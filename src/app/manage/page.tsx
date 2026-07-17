@@ -421,6 +421,9 @@ export default function ManageConsultationPage() {
       {troubleOpen && <TroubleModal onClose={() => setTroubleOpen(false)} />}
       <style jsx global>{`
         @media print {
+          .site-nav {
+            display: none !important;
+          }
           body * {
             visibility: hidden;
           }
