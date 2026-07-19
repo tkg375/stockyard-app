@@ -613,9 +613,13 @@ select.form-input {
    width that ignores the input's box width, so long locale strings like
    "Jul 20, 2026" spill past the input's rounded border on narrow screens. */
 @media (max-width: 480px) {
-  input[type="date"].form-input {
-    font-size: 0.85rem;
-    padding-right: 8px;
+  input[type="date"].form-input,
+  .form-group input[type="date"] {
+    font-size: 0.8rem;
+    padding: 10px 4px 10px 8px;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
   }
 }
 
@@ -654,6 +658,8 @@ textarea.form-input {
   background: #fff;
   transition: border-color 0.2s, box-shadow 0.2s;
   box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .form-group select:focus,
@@ -1334,6 +1340,7 @@ textarea.form-input {
 .form-col-span-2 { grid-column: 1 / -1; }
 .form-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 20px; }
 .form-grid-address { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0 12px; }
+.form-grid-2 > .form-group, .form-grid-3 > .form-group, .form-grid-address > .form-group { min-width: 0; }
 
 @media (max-width: 560px) {
   .form-grid-2, .form-grid-3, .form-grid-address { grid-template-columns: 1fr; }
