@@ -13,7 +13,7 @@ function generateSlots(start: string, end: string): string[] {
   const [endH, endM] = end.split(":").map(Number);
   const startMin = startH * 60 + startM;
   const endMin = endH * 60 + endM;
-  for (let m = startMin; m < endMin; m += 30) {
+  for (let m = startMin; m < endMin; m += 15) {
     const h = Math.floor(m / 60);
     const min = m % 60;
     slots.push(`${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
