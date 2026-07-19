@@ -601,10 +601,22 @@ img { max-width: 100%; height: auto; }
   transition: border-color 0.2s, box-shadow 0.2s;
   box-sizing: border-box;
   line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
 }
 
 select.form-input {
   cursor: pointer;
+}
+
+/* iOS Safari renders the native date control's text at a fixed intrinsic
+   width that ignores the input's box width, so long locale strings like
+   "Jul 20, 2026" spill past the input's rounded border on narrow screens. */
+@media (max-width: 480px) {
+  input[type="date"].form-input {
+    font-size: 0.85rem;
+    padding-right: 8px;
+  }
 }
 
 textarea.form-input {

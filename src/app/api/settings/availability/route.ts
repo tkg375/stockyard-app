@@ -73,11 +73,12 @@ export async function GET(req: NextRequest) {
     const dayConfigLegacy = availability.weeklySchedule?.[String(jsDay)];
 
     let allSlots: string[];
-    if (Array.isArray(dayConfigLegacy)) {
+    if (dayConfigNew) {
+      // New format takes precedence when present
+      allSlots = dayConfigNew.enabled ? generateSlots(dayConfigNew.start, dayConfigNew.end) : [];
+    } else if (Array.isArray(dayConfigLegacy)) {
       // Legacy format — slots are stored explicitly
       allSlots = dayConfigLegacy as string[];
-    } else if (dayConfigNew?.enabled) {
-      allSlots = generateSlots(dayConfigNew.start, dayConfigNew.end);
     } else {
       return NextResponse.json({ slots: [] });
     }
