@@ -634,6 +634,16 @@ select.form-input {
   width: 100%;
 }
 
+/* Shrink the date text on narrow screens so it actually fits inside the
+   box instead of being clipped by .date-input-clip's overflow:hidden. */
+@media (max-width: 480px) {
+  .date-input-clip input[type="date"] {
+    font-size: 0.72rem;
+    padding-left: 8px;
+    padding-right: 6px;
+  }
+}
+
 textarea.form-input {
   height: auto;
   min-height: 44px;
