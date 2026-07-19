@@ -619,24 +619,19 @@ select.form-input {
   padding-right: 40px;
 }
 
-/* iOS Safari renders the native date control's text at a fixed intrinsic
-   width that ignores the input's box width, so long locale strings like
-   "Jul 20, 2026" spill past the input's rounded border on narrow screens. */
-@media (max-width: 480px) {
-  input[type="date"].form-input {
-    font-size: 0.8rem;
-    padding: 10px 6px 10px 8px;
-    min-width: 0;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .form-group input[type="date"] {
-    font-size: 0.8rem;
-    padding: 13px 6px 13px 8px;
-    min-width: 0;
-    width: 100%;
-    box-sizing: border-box;
-  }
+/* iOS Safari renders the native date control's shadow-DOM content at an
+   intrinsic width that ignores the input's own box/overflow, so long
+   locale strings like "Jul 20, 2026" spill past the rounded border on
+   narrow screens no matter what padding/font-size is set on the input
+   itself. A wrapping element with its own overflow:hidden reliably clips
+   it regardless of what the native control tries to render internally. */
+.date-input-clip {
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+.date-input-clip input[type="date"] {
+  width: 100%;
 }
 
 textarea.form-input {

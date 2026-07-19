@@ -414,7 +414,9 @@ export default function BookPage() {
                 </div>
                 <div className="form-group">
                   <label>Date of Birth * <span style={{ color: "#9ca3af", fontWeight: 400, fontSize: "0.8rem" }}>(est. ok)</span></label>
-                  <input className="form-input" type="date" value={petDob} onChange={e => setPetDob(e.target.value)} max={today} required />
+                  <div className="date-input-clip">
+                    <input className="form-input" type="date" value={petDob} onChange={e => setPetDob(e.target.value)} max={today} required />
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>Weight (lbs) *</label>
@@ -498,7 +500,9 @@ export default function BookPage() {
               <p style={{ color: "#666", marginBottom: 20, fontSize: "0.9rem" }}>All times are Eastern (EST). Dr. McMillen will connect at your selected time.</p>
               <div className="form-group">
                 <label>Date *</label>
-                <input className="form-input" type="date" min={today} value={date} onChange={e => setDate(e.target.value)} />
+                <div className="date-input-clip">
+                  <input className="form-input" type="date" min={today} value={date} onChange={e => setDate(e.target.value)} />
+                </div>
               </div>
 
               {date && (
