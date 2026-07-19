@@ -1,11 +1,38 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import SiteNav from "@/components/SiteNav";
 import SiteFooter from "@/components/SiteFooter";
 import Link from "next/link";
 
+const DAY_ORDER: { key: string; label: string }[] = [
+  { key: "mon", label: "Monday" },
+  { key: "tue", label: "Tuesday" },
+  { key: "wed", label: "Wednesday" },
+  { key: "thu", label: "Thursday" },
+  { key: "fri", label: "Friday" },
+  { key: "sat", label: "Saturday" },
+  { key: "sun", label: "Sunday" },
+];
+
+function fmtHour(t: string) {
+  const [h, m] = t.split(":").map(Number);
+  const hour12 = h % 12 || 12;
+  return `${hour12}:${String(m).padStart(2, "0")} ${h >= 12 ? "PM" : "AM"}`;
+}
+
+type DaySchedule = { enabled: boolean; start: string; end: string };
+
 export default function HomePage() {
   const mainRef = useRef<HTMLElement>(null);
+  const [schedule, setSchedule] = useState<Record<string, DaySchedule> | null>(null);
+
+  useEffect(() => {
+    fetch("/api/settings/availability?public=1")
+      .then(r => r.ok ? r.json() : null)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then((d: any) => { if (d?.weeklySchedule) setSchedule(d.weeklySchedule); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const els = mainRef.current?.querySelectorAll<HTMLElement>(".reveal") ?? [];
@@ -234,14 +261,18 @@ export default function HomePage() {
               <div>
                 <div className="hours-box">
                   <h3>Appointment Hours</h3>
-                  <div className="hours-row"><span className="day">Monday</span><span className="time">5:30 PM – 11:00 PM EST</span></div>
-                  <div className="hours-row"><span className="day">Tuesday</span><span className="time">5:30 PM – 11:00 PM EST</span></div>
-                  <div className="hours-row"><span className="day">Wednesday</span><span className="time">5:30 PM – 11:00 PM EST</span></div>
-                  <div className="hours-row"><span className="day">Thursday</span><span className="time">5:30 PM – 11:00 PM EST</span></div>
-                  <div className="hours-row"><span className="day">Friday</span><span className="time">5:30 PM – 11:00 PM EST</span></div>
-                  <div className="hours-row"><span className="day">Saturday</span><span className="time">9:00 AM – 11:00 PM EST</span></div>
-                  <div className="hours-row"><span className="day">Sunday</span><span className="time">9:00 AM – 11:00 PM EST</span></div>
-                  <p style={{ fontSize: "0.85rem", color: "var(--color-text-light)", marginTop: "16px" }}>Hours designed around the reality of farm life — evenings and full weekends available.</p>
+                  {DAY_ORDER.map(({ key, label }) => {
+                    const day = schedule?.[key];
+                    return (
+                      <div className="hours-row" key={key}>
+                        <span className="day">{label}</span>
+                        <span className="time">
+                          {!schedule ? "…" : day?.enabled ? `${fmtHour(day.start)} – ${fmtHour(day.end)} EST` : "Closed"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <p style={{ fontSize: "0.85rem", color: "var(--color-text-light)", marginTop: "16px" }}>Hours designed around the reality of farm life — evenings available every day of the week.</p>
                 </div>
                 <div style={{ background: "rgba(255,255,255,0.55)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderRadius: "12px", padding: "28px", border: "1px solid rgba(255,255,255,0.35)", marginTop: "24px" }}>
                   <h3 style={{ fontSize: "1.1rem", color: "#1a6a6a", marginBottom: "16px" }}>What Happens After Your Appointment?</h3>

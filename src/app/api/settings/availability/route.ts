@@ -35,6 +35,21 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const date = searchParams.get("date");
 
+  if (searchParams.get("public")) {
+    // Public, read-only summary for marketing pages — weekly hours only, no blockedDates.
+    const db = await getDb();
+    const row = await db
+      .prepare("SELECT value FROM settings WHERE key = 'availability'")
+      .first<{ value: string }>();
+    if (!row) return NextResponse.json({ weeklySchedule: {} }, { headers: CORS });
+    try {
+      const availability = JSON.parse(row.value) as { weeklySchedule?: unknown };
+      return NextResponse.json({ weeklySchedule: availability.weeklySchedule ?? {} }, { headers: CORS });
+    } catch {
+      return NextResponse.json({ weeklySchedule: {} }, { headers: CORS });
+    }
+  }
+
   if (date) {
     // Validate date format before using it
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
