@@ -418,13 +418,17 @@ export default function VetDashboardPage() {
   async function saveAvailability() {
     setAvailSaving(true);
     setAvailMsg("");
-    await fetch("/api/settings/availability", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ weeklySchedule: schedule, blockedDates }),
-    });
+    try {
+      const res = await fetch("/api/settings/availability", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weeklySchedule: schedule, blockedDates }),
+      });
+      setAvailMsg(res.ok ? "Availability saved!" : "Failed to save. Please try again.");
+    } catch {
+      setAvailMsg("Network error. Please try again.");
+    }
     setAvailSaving(false);
-    setAvailMsg("Availability saved!");
     setTimeout(() => setAvailMsg(""), 3000);
   }
 

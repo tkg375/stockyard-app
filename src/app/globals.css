@@ -607,6 +607,16 @@ img { max-width: 100%; height: auto; }
 
 select.form-input {
   cursor: pointer;
+  /* Native select chrome (esp. iOS Safari) renders taller than a plain
+     text input at the same padding/border, throwing off row alignment.
+     Strip it and draw a custom arrow so the box height matches exactly. */
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23374151' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 14px;
+  padding-right: 40px;
 }
 
 /* iOS Safari renders the native date control's text at a fixed intrinsic
