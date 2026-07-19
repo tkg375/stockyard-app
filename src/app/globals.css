@@ -613,10 +613,16 @@ select.form-input {
    width that ignores the input's box width, so long locale strings like
    "Jul 20, 2026" spill past the input's rounded border on narrow screens. */
 @media (max-width: 480px) {
-  input[type="date"].form-input,
+  input[type="date"].form-input {
+    font-size: 0.8rem;
+    padding: 10px 6px 10px 8px;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+  }
   .form-group input[type="date"] {
     font-size: 0.8rem;
-    padding: 10px 4px 10px 8px;
+    padding: 13px 6px 13px 8px;
     min-width: 0;
     width: 100%;
     box-sizing: border-box;
