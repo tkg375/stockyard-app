@@ -455,6 +455,12 @@ img { max-width: 100%; height: auto; }
   margin-bottom: 40px;
 }
 
+.footer-links-row {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+}
+
 .footer-brand h3 {
   font-family: var(--font-display);
   font-weight: 800;
@@ -1354,6 +1360,7 @@ textarea.form-input {
   .hero h1 { font-size: 1.8rem; }
   .auth-card { padding: 28px 20px; }
   .animals-grid-full { grid-template-columns: repeat(2, 1fr); }
+  .footer-links-row { flex-direction: column; align-items: center; gap: 32px; }
 }
 
 /* Responsive grid helpers */

@@ -14,38 +14,40 @@ export default function SiteFooter() {
               throughout Florida.
             </p>
           </div>
-          <div className="footer-links">
-            <h4>For Emergencies</h4>
-            <p style={{ fontSize: "0.82rem", lineHeight: 1.6, margin: "0 0 6px 0" }}>
-              Telehealth is not for emergencies. If your animal needs urgent care, contact:
-            </p>
-            <ul style={{ columns: 1, fontSize: "0.82rem", lineHeight: 1.7 }}>
-              <li>
-                <strong>UF Small Animal Hospital</strong><br />
-                <a href="tel:3523922235">(352) 392-2235</a>
-              </li>
-              <li>
-                <strong>UF Large Animal Hospital</strong><br />
-                <a href="tel:3523922229">(352) 392-2229</a>
-              </li>
-              <li style={{ color: "rgba(255,255,255,0.65)" }}>
-                2089 SW 16th Ave, Gainesville, FL
-              </li>
-            </ul>
-          </div>
-          <div className="footer-links">
-            <h4>Quick Links</h4>
-            <ul style={{ columns: 1 }}>
-              <li>
-                <Link href="/about">About Dr. McMillen</Link>
-              </li>
-              <li>
-                <Link href="/privacy-policy">Privacy Policy</Link>
-              </li>
-              <li>
-                <Link href="/terms">Terms and Conditions</Link>
-              </li>
-            </ul>
+          <div className="footer-links-row">
+            <div className="footer-links">
+              <h4>For Emergencies</h4>
+              <p style={{ fontSize: "0.82rem", lineHeight: 1.6, margin: "0 0 6px 0" }}>
+                Telehealth is not for emergencies. If your animal needs urgent care, contact:
+              </p>
+              <ul style={{ columns: 1, fontSize: "0.82rem", lineHeight: 1.7 }}>
+                <li>
+                  <strong>UF Small Animal Hospital</strong><br />
+                  <a href="tel:3523922235">(352) 392-2235</a>
+                </li>
+                <li>
+                  <strong>UF Large Animal Hospital</strong><br />
+                  <a href="tel:3523922229">(352) 392-2229</a>
+                </li>
+                <li style={{ color: "rgba(255,255,255,0.65)" }}>
+                  2089 SW 16th Ave, Gainesville, FL
+                </li>
+              </ul>
+            </div>
+            <div className="footer-links">
+              <h4>Quick Links</h4>
+              <ul style={{ columns: 1 }}>
+                <li>
+                  <Link href="/about">About Dr. McMillen</Link>
+                </li>
+                <li>
+                  <Link href="/privacy-policy">Privacy Policy</Link>
+                </li>
+                <li>
+                  <Link href="/terms">Terms and Conditions</Link>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
         <div className="footer-bottom">
