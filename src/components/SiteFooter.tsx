@@ -18,7 +18,7 @@ export default function SiteFooter() {
             <div className="footer-links">
               <h4>For Emergencies</h4>
               <p style={{ fontSize: "0.82rem", lineHeight: 1.6, margin: "0 0 6px 0" }}>
-                Telehealth is not for emergencies. If your animal needs urgent care, contact:
+                Telehealth is not for emergencies.<br />If your animal needs urgent care, contact:
               </p>
               <ul style={{ columns: 1, fontSize: "0.82rem", lineHeight: 1.7 }}>
                 <li>
